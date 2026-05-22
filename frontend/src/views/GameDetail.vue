@@ -167,53 +167,130 @@
             </div>
           </div>
 
-          <!-- MY COPY CARD -->
-          <div class="chunk-card">
-            <h3 class="chunk-title">My Copy</h3>
-            <div class="details-grid">
-              <div v-if="game.condition" class="detail-item">
-                <label>Condition</label>
-                <span>{{ game.condition }}</span>
+          <!-- MY COPIES CARD -->
+          <div class="chunk-card copies-card">
+            <div class="copies-header">
+              <h3 class="chunk-title m-0">My Copies ({{ copies.length }})</h3>
+              <button type="button" class="btn btn-primary btn-sm" @click="openAddCopyForm">+ Add Copy</button>
+            </div>
+
+            <div v-if="copies.length === 0" class="text-muted text-sm mt-2">No copies tracked yet.</div>
+
+            <div v-for="(copy, idx) in copies" :key="copy.id" class="copy-row">
+              <div class="copy-row-header">
+                <span class="copy-label">Copy {{ idx + 1 }}</span>
+                <div class="copy-row-actions">
+                  <button type="button" class="btn btn-sm btn-secondary" @click="openEditCopyForm(copy)">Edit</button>
+                  <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" :disabled="copies.length <= 1">Delete</button>
+                </div>
               </div>
-              <div v-if="game.quantity" class="detail-item">
-                <label>Quantity</label>
-                <span>{{ game.quantity }}</span>
+              <div class="details-grid">
+                <div v-if="copy.condition" class="detail-item">
+                  <label>Condition</label>
+                  <span>{{ copy.condition }}</span>
+                </div>
+                <div v-if="copy.completeness" class="detail-item">
+                  <label>Completeness</label>
+                  <span>{{ copy.completeness }}</span>
+                </div>
+                <div v-if="copy.region" class="detail-item">
+                  <label>Region</label>
+                  <span>{{ copy.region }}</span>
+                </div>
+                <div v-if="copy.barcode" class="detail-item">
+                  <label>Barcode</label>
+                  <span>{{ copy.barcode }}</span>
+                </div>
+                <div v-if="copy.location" class="detail-item">
+                  <label>Location</label>
+                  <span>{{ copy.location }}</span>
+                </div>
+                <div v-if="copy.purchase_date" class="detail-item">
+                  <label>Purchase Date</label>
+                  <span>{{ copy.purchase_date }}</span>
+                </div>
+                <div v-if="copy.purchase_price" class="detail-item">
+                  <label>Purchase Price</label>
+                  <span>€{{ copy.purchase_price }}</span>
+                </div>
+                <div v-if="game.current_value && copy.purchase_price" class="detail-item detail-item-pl">
+                  <label>Profit / Loss</label>
+                  <span class="pl-pill" :class="game.current_value >= copy.purchase_price ? 'profit' : 'loss'">
+                    {{ game.current_value >= copy.purchase_price ? '↑' : '↓' }}
+                    €{{ Math.abs(game.current_value - copy.purchase_price).toFixed(2) }}
+                  </span>
+                </div>
               </div>
-              <div v-if="game.completeness" class="detail-item">
-                <label>Completeness</label>
-                <span>{{ game.completeness }}</span>
+              <div v-if="copy.notes" class="copy-notes">{{ copy.notes }}</div>
+            </div>
+
+            <!-- Inline copy form -->
+            <div v-if="copyFormOpen" class="copy-form">
+              <h4 class="copy-form-title">{{ editingCopyId ? 'Edit Copy' : 'Add Copy' }}</h4>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Condition</label>
+                  <select v-model="copyForm.condition">
+                    <option value="">Select</option>
+                    <option>Mint</option>
+                    <option>Good</option>
+                    <option>Fair</option>
+                    <option>Poor</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Completeness</label>
+                  <select v-model="copyForm.completeness">
+                    <option value="">Select</option>
+                    <option>New/Sealed</option>
+                    <option>CIB (Complete In Box)</option>
+                    <option>Box + Game</option>
+                    <option>Game + Manual</option>
+                    <option>Loose</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Region</label>
+                  <select v-model="copyForm.region">
+                    <option value="">Select</option>
+                    <option>PAL</option>
+                    <option>NTSC</option>
+                    <option>EU</option>
+                    <option>US</option>
+                    <option>JP</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Barcode</label>
+                  <input v-model="copyForm.barcode" />
+                </div>
+                <div class="form-group">
+                  <label>Purchase Price (€)</label>
+                  <input v-model.number="copyForm.purchase_price" type="number" step="0.01" />
+                </div>
+                <div class="form-group">
+                  <label>Purchase Date</label>
+                  <input v-model="copyForm.purchase_date" type="date" />
+                </div>
+                <div class="form-group">
+                  <label>Location</label>
+                  <input v-model="copyForm.location" placeholder="e.g. Shelf A, Box 3" />
+                </div>
+                <div class="form-group full-width">
+                  <label>Notes</label>
+                  <textarea v-model="copyForm.notes" rows="2"></textarea>
+                </div>
               </div>
-              <div v-if="game.barcode" class="detail-item">
-                <label>Barcode</label>
-                <span>{{ game.barcode }}</span>
-              </div>
-              <div v-if="game.location" class="detail-item">
-                <label>Location</label>
-                <span>{{ game.location }}</span>
-              </div>
-              <div v-if="game.purchase_date" class="detail-item">
-                <label>Purchase Date</label>
-                <span>{{ game.purchase_date }}</span>
-              </div>
-              <div v-if="game.purchase_price" class="detail-item">
-                <label>Purchase Price</label>
-                <span>€{{ game.purchase_price }}</span>
-              </div>
-              <div v-if="game.current_value && game.purchase_price" class="detail-item detail-item-pl">
-                <label>Profit / Loss</label>
-                <span class="pl-pill" :class="game.current_value >= game.purchase_price ? 'profit' : 'loss'">
-                  {{ game.current_value >= game.purchase_price ? '↑' : '↓' }}
-                  €{{ Math.abs(game.current_value - game.purchase_price).toFixed(2) }}
-                </span>
+              <div class="copy-form-actions">
+                <button type="button" class="btn btn-primary" @click="saveCopyForm" :disabled="copySaving">
+                  {{ copySaving ? 'Saving...' : (editingCopyId ? 'Update Copy' : 'Add Copy') }}
+                </button>
+                <button type="button" class="btn btn-secondary" @click="cancelCopyForm">Cancel</button>
               </div>
             </div>
           </div>
         </div>
 
-        <div v-if="game.notes" class="notes mt-3 card">
-          <label>Personal Notes</label>
-          <p>{{ game.notes }}</p>
-        </div>
         <div v-if="game.description" class="notes mt-3 card">
           <label>Description</label>
           <p class="description-text" v-html="formattedDescription"></p>
@@ -458,6 +535,14 @@ const startValue = ref(null)
 const coverHasError = ref(false)
 const coverAutoFixing = ref(false)
 const coverAutoEnrichTried = ref(false)
+const copies = ref([])
+const copyFormOpen = ref(false)
+const editingCopyId = ref(null)
+const copySaving = ref(false)
+const copyForm = ref({
+  condition: '', completeness: '', region: '', barcode: '',
+  purchase_price: null, purchase_date: '', location: '', notes: ''
+})
 let chartInstance = null
 
 const latestPrice = computed(() => priceHistory.value[0] ?? null)
@@ -630,7 +715,7 @@ watch(
 )
 
 function relevantKey() {
-  const c = (game.value?.completeness || '').toLowerCase()
+  const c = (copies.value[0]?.completeness || game.value?.completeness || '').toLowerCase()
   if (c.includes('new') || c.includes('sealed')) return 'new'
   if (c.includes('cib') || c.includes('complete') || c.includes('box')) return 'complete'
   return 'loose'
@@ -942,6 +1027,7 @@ async function loadGame() {
     const res = await gamesApi.get(route.params.id)
     if (res.ok) {
       game.value = res.data
+      copies.value = res.data.copies || []
       coverAutoEnrichTried.value = false
       coverHasError.value = false
       if (startValue.value == null) {
@@ -956,6 +1042,76 @@ async function loadGame() {
     notifyError('Failed to load game.')
   } finally {
     loading.value = false
+  }
+}
+
+function openAddCopyForm() {
+  editingCopyId.value = null
+  copyForm.value = { condition: '', completeness: '', region: '', barcode: '', purchase_price: null, purchase_date: '', location: '', notes: '' }
+  copyFormOpen.value = true
+}
+
+function openEditCopyForm(copy) {
+  editingCopyId.value = copy.id
+  copyForm.value = {
+    condition: copy.condition || '',
+    completeness: copy.completeness || '',
+    region: copy.region || '',
+    barcode: copy.barcode || '',
+    purchase_price: copy.purchase_price ?? null,
+    purchase_date: copy.purchase_date || '',
+    location: copy.location || '',
+    notes: copy.notes || ''
+  }
+  copyFormOpen.value = true
+}
+
+function cancelCopyForm() {
+  copyFormOpen.value = false
+  editingCopyId.value = null
+}
+
+async function saveCopyForm() {
+  copySaving.value = true
+  try {
+    const payload = { ...copyForm.value }
+    let res
+    if (editingCopyId.value) {
+      res = await gamesApi.updateCopy(route.params.id, editingCopyId.value, payload)
+    } else {
+      res = await gamesApi.addCopy(route.params.id, payload)
+    }
+    if (res.ok) {
+      notifySuccess(editingCopyId.value ? 'Copy updated.' : 'Copy added.')
+      copyFormOpen.value = false
+      editingCopyId.value = null
+      await loadGame()
+    } else {
+      const detail = res.data?.detail
+      notifyError(detail?.message || detail || 'Failed to save copy.')
+    }
+  } catch (e) {
+    console.error('Failed to save copy:', e)
+    notifyError('Failed to save copy.')
+  } finally {
+    copySaving.value = false
+  }
+}
+
+async function deleteCopy(copyId) {
+  if (!confirm('Delete this copy?')) return
+  try {
+    const res = await gamesApi.deleteCopy(route.params.id, copyId)
+    if (res.ok) {
+      notifySuccess('Copy deleted.')
+      await loadGame()
+    } else {
+      const detail = res.data?.detail
+      notifyError(detail?.message || detail || 'Failed to delete copy.')
+    }
+  } catch (e) {
+    console.error('Failed to delete copy:', e)
+    notifyError('Failed to delete copy.')
   }
 }
 
@@ -1962,6 +2118,71 @@ onMounted(async () => {
 
 .price-history-value {
   font-size: 0.85rem;
+}
+
+.copies-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.copy-row {
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px dashed var(--glass-border);
+}
+
+.copy-row:last-of-type {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.copy-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.copy-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.copy-row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.copy-notes {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.copy-form {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+.copy-form-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+}
+
+.copy-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 639px) {

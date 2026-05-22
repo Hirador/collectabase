@@ -12,7 +12,11 @@ export const gamesApi = {
   getImages: (id) => apiGet(`/api/games/${id}/images`),
   uploadImage: (id, payload) => apiPost(`/api/games/${id}/images`, payload),
   deleteImage: (id, imageId) => apiDelete(`/api/games/${id}/images/${imageId}`),
-  setPrimaryImage: (id, imageId) => apiPost(`/api/games/${id}/images/${imageId}/primary`)
+  setPrimaryImage: (id, imageId) => apiPost(`/api/games/${id}/images/${imageId}/primary`),
+  listCopies: (id) => apiGet(`/api/games/${id}/copies`),
+  addCopy: (id, payload) => apiPost(`/api/games/${id}/copies`, payload),
+  updateCopy: (id, copyId, payload) => apiPut(`/api/games/${id}/copies/${copyId}`, payload),
+  deleteCopy: (id, copyId) => apiDelete(`/api/games/${id}/copies/${copyId}`),
 }
 
 export const platformsApi = {

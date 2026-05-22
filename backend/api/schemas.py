@@ -80,6 +80,21 @@ class GameUpdate(GameCreate):
     vinyl_format: Optional[str] = None
 
 
+class CopyCreate(BaseModel):
+    condition: Optional[str] = None
+    completeness: Optional[str] = None
+    region: Optional[str] = None
+    barcode: Optional[str] = None
+    purchase_price: Optional[float] = None
+    purchase_date: Optional[str] = None
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CopyUpdate(CopyCreate):
+    pass
+
+
 class PlatformCreate(BaseModel):
     name: str
     manufacturer: Optional[str] = None

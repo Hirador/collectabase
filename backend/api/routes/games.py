@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter
 
 from ..errors import conflict, not_found
-from ..schemas import GameCreate, GameUpdate, PlatformCreate
+from ..schemas import CopyCreate, CopyUpdate, GameCreate, GameUpdate, PlatformCreate
 from ...database import dict_from_row, get_db
 from ...services.lookup_service import cache_remote_cover
 
@@ -19,7 +19,8 @@ async def list_games(
 ):
     with get_db() as db:
         query = """
-            SELECT g.*, p.name as platform_name
+            SELECT g.*, p.name as platform_name,
+              (SELECT COUNT(*) FROM game_copies gc WHERE gc.game_id = g.id) as copies_count
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
             WHERE 1=1
@@ -103,8 +104,26 @@ async def create_game(game: GameCreate, force: bool = False):
                 game.vinyl_format,
             ),
         )
+        game_id = cursor.lastrowid
+        db.execute(
+            """INSERT INTO game_copies
+                   (game_id, condition, completeness, region, barcode,
+                    purchase_price, purchase_date, location, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                game_id,
+                game.condition,
+                game.completeness,
+                game.region,
+                game.barcode,
+                game.purchase_price,
+                game.purchase_date,
+                game.location,
+                game.notes,
+            ),
+        )
         db.commit()
-        return {"id": cursor.lastrowid, "message": "Game created successfully"}
+        return {"id": game_id, "message": "Game created successfully"}
 
 
 @router.get("/api/games/{game_id}")
@@ -122,6 +141,11 @@ async def get_game(game_id: int):
         game = dict_from_row(cursor.fetchone())
         if not game:
             raise not_found("Game not found")
+        copies_cursor = db.execute(
+            "SELECT * FROM game_copies WHERE game_id = ? ORDER BY id",
+            (game_id,),
+        )
+        game["copies"] = [dict_from_row(row) for row in copies_cursor.fetchall()]
         return game
 
 
@@ -224,6 +248,29 @@ async def update_game(game_id: int, game: GameUpdate):
                 game_id,
             ),
         )
+        first_copy = db.execute(
+            "SELECT id FROM game_copies WHERE game_id = ? ORDER BY id LIMIT 1",
+            (game_id,),
+        ).fetchone()
+        if first_copy:
+            db.execute(
+                """UPDATE game_copies SET
+                       condition = ?, completeness = ?, region = ?, barcode = ?,
+                       purchase_price = ?, purchase_date = ?, location = ?, notes = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (
+                    merged["condition"],
+                    merged["completeness"],
+                    merged["region"],
+                    merged["barcode"],
+                    merged["purchase_price"],
+                    merged["purchase_date"],
+                    merged["location"],
+                    merged["notes"],
+                    first_copy[0],
+                ),
+            )
         db.commit()
         return {"id": game_id, "message": "Game updated successfully"}
 
@@ -311,6 +358,122 @@ async def delete_game_image(game_id: int, image_id: int):
                 
         db.commit()
         return {"message": "Image deleted"}
+
+
+@router.get("/api/games/{game_id}/copies")
+async def list_copies(game_id: int):
+    with get_db() as db:
+        existing = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
+        if not existing:
+            raise not_found("Game not found")
+        cursor = db.execute(
+            "SELECT * FROM game_copies WHERE game_id = ? ORDER BY id",
+            (game_id,),
+        )
+        return [dict_from_row(row) for row in cursor.fetchall()]
+
+
+@router.post("/api/games/{game_id}/copies")
+async def add_copy(game_id: int, copy: CopyCreate):
+    with get_db() as db:
+        existing = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
+        if not existing:
+            raise not_found("Game not found")
+        cursor = db.execute(
+            """INSERT INTO game_copies
+                   (game_id, condition, completeness, region, barcode,
+                    purchase_price, purchase_date, location, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                game_id,
+                copy.condition,
+                copy.completeness,
+                copy.region,
+                copy.barcode,
+                copy.purchase_price,
+                copy.purchase_date,
+                copy.location,
+                copy.notes,
+            ),
+        )
+        new_id = cursor.lastrowid
+        db.commit()
+        return {
+            "id": new_id,
+            "game_id": game_id,
+            "condition": copy.condition,
+            "completeness": copy.completeness,
+            "region": copy.region,
+            "barcode": copy.barcode,
+            "purchase_price": copy.purchase_price,
+            "purchase_date": copy.purchase_date,
+            "location": copy.location,
+            "notes": copy.notes,
+        }
+
+
+@router.put("/api/games/{game_id}/copies/{copy_id}")
+async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
+    with get_db() as db:
+        existing = db.execute(
+            "SELECT * FROM game_copies WHERE id = ? AND game_id = ?", (copy_id, game_id)
+        ).fetchone()
+        if not existing:
+            raise not_found("Copy not found")
+        existing_data = dict_from_row(existing)
+        merged = {
+            "condition": copy.condition if copy.condition is not None else existing_data["condition"],
+            "completeness": copy.completeness if copy.completeness is not None else existing_data["completeness"],
+            "region": copy.region if copy.region is not None else existing_data["region"],
+            "barcode": copy.barcode if copy.barcode is not None else existing_data["barcode"],
+            "purchase_price": copy.purchase_price if copy.purchase_price is not None else existing_data["purchase_price"],
+            "purchase_date": copy.purchase_date if copy.purchase_date is not None else existing_data["purchase_date"],
+            "location": copy.location if copy.location is not None else existing_data["location"],
+            "notes": copy.notes if copy.notes is not None else existing_data["notes"],
+        }
+        db.execute(
+            """UPDATE game_copies SET
+                   condition = ?, completeness = ?, region = ?, barcode = ?,
+                   purchase_price = ?, purchase_date = ?, location = ?, notes = ?,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (
+                merged["condition"], merged["completeness"], merged["region"], merged["barcode"],
+                merged["purchase_price"], merged["purchase_date"], merged["location"], merged["notes"],
+                copy_id,
+            ),
+        )
+        db.commit()
+        return {
+            "id": copy_id,
+            "game_id": game_id,
+            "condition": merged["condition"],
+            "completeness": merged["completeness"],
+            "region": merged["region"],
+            "barcode": merged["barcode"],
+            "purchase_price": merged["purchase_price"],
+            "purchase_date": merged["purchase_date"],
+            "location": merged["location"],
+            "notes": merged["notes"],
+        }
+
+
+@router.delete("/api/games/{game_id}/copies/{copy_id}")
+async def delete_copy(game_id: int, copy_id: int):
+    with get_db() as db:
+        existing = db.execute(
+            "SELECT id FROM game_copies WHERE id = ? AND game_id = ?", (copy_id, game_id)
+        ).fetchone()
+        if not existing:
+            raise not_found("Copy not found")
+        count = db.execute(
+            "SELECT COUNT(*) FROM game_copies WHERE game_id = ?", (game_id,)
+        ).fetchone()[0]
+        if count <= 1:
+            raise conflict("Cannot delete the last copy of a game")
+        db.execute("DELETE FROM game_copies WHERE id = ?", (copy_id,))
+        db.commit()
+        return {"message": "Copy deleted"}
 
 
 @router.get("/api/platforms")

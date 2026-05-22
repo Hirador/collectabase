@@ -55,6 +55,26 @@ class Game(Base):
     platform = relationship("Platform", back_populates="games")
     price_history = relationship("PriceHistory", back_populates="game", cascade="all, delete-orphan")
     images = relationship("ItemImage", back_populates="game", cascade="all, delete-orphan")
+    copies = relationship("GameCopy", back_populates="game", cascade="all, delete-orphan", order_by="GameCopy.id")
+
+class GameCopy(Base):
+    __tablename__ = "game_copies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(Integer, ForeignKey("games.id", ondelete="CASCADE"), nullable=False)
+    condition = Column(String)
+    completeness = Column(String)
+    region = Column(String)
+    barcode = Column(String)
+    purchase_price = Column(Float)
+    purchase_date = Column(String)
+    location = Column(String)
+    notes = Column(Text)
+    created_at = Column(String, server_default=func.current_timestamp())
+    updated_at = Column(String, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+    game = relationship("Game", back_populates="copies")
+
 
 class ItemImage(Base):
     __tablename__ = "item_images"
