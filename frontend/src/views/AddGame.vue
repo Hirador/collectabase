@@ -65,7 +65,7 @@
             </select>
           </div>
 
-          <div class="form-group">
+          <div v-if="!isEditMode" class="form-group">
             <label>Quantity</label>
             <input v-model.number="game.quantity" type="number" min="1" step="1" required />
           </div>
@@ -116,7 +116,7 @@
             </select>
           </div>
 
-          <div class="form-group">
+          <div v-if="!isEditMode" class="form-group">
             <label>Condition</label>
             <select v-model="game.condition">
               <option value="">Select</option>
@@ -127,7 +127,7 @@
             </select>
           </div>
 
-          <div class="form-group">
+          <div v-if="!isEditMode" class="form-group">
             <label>Completeness</label>
             <select v-model="game.completeness">
               <option value="">Select</option>
@@ -144,17 +144,17 @@
             <input v-model="game.release_date" type="date" />
           </div>
 
-          <div class="form-group">
+          <div v-if="!isEditMode" class="form-group">
             <label>Location</label>
             <input v-model="game.location" placeholder="e.g. Shelf A, Box 3" />
           </div>
 
-          <div class="form-group">
+          <div v-if="!isEditMode" class="form-group">
             <label>Purchase Date</label>
             <input v-model="game.purchase_date" type="date" />
           </div>
 
-          <div class="form-group">
+          <div v-if="!isEditMode" class="form-group">
             <label>Purchase Price (€)</label>
             <input v-model.number="game.purchase_price" type="number" step="0.01" />
           </div>
@@ -255,7 +255,7 @@
             <textarea v-model="game.description" rows="3"></textarea>
           </div>
 
-          <div class="form-group full-width">
+          <div v-if="!isEditMode" class="form-group full-width">
             <label>Notes</label>
             <textarea v-model="game.notes" rows="3"></textarea>
           </div>
@@ -288,6 +288,140 @@
           <router-link to="/" class="btn btn-secondary">Cancel</router-link>
         </div>
       </form>
+
+      <!-- MY COPIES — edit mode only -->
+      <div v-if="isEditMode" class="copies-section mt-3">
+        <h3 class="copies-title">My Copies ({{ copies.length }})</h3>
+        <div class="copies-row">
+          <div v-for="(copy, idx) in copies" :key="copy.id" class="copy-card">
+            <!-- Edit mode -->
+            <template v-if="editingCopyId === copy.id">
+              <div class="copy-card-title">Edit Copy {{ idx + 1 }}</div>
+              <div class="copy-form-fields">
+                <div class="copy-form-row">
+                  <label>Condition</label>
+                  <select v-model="copyForm.condition">
+                    <option value="">—</option>
+                    <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
+                  </select>
+                </div>
+                <div class="copy-form-row">
+                  <label>Completeness</label>
+                  <select v-model="copyForm.completeness">
+                    <option value="">—</option>
+                    <option>New/Sealed</option><option>CIB (Complete In Box)</option>
+                    <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                  </select>
+                </div>
+                <div class="copy-form-row">
+                  <label>Price (€)</label>
+                  <input v-model.number="copyForm.purchase_price" type="number" step="0.01" />
+                </div>
+                <div class="copy-form-row">
+                  <label>Purchase Date</label>
+                  <input v-model="copyForm.purchase_date" type="date" />
+                </div>
+                <div class="copy-form-row">
+                  <label>Location</label>
+                  <input v-model="copyForm.location" placeholder="Shelf A…" />
+                </div>
+                <div class="copy-form-row">
+                  <label>Notes</label>
+                  <textarea v-model="copyForm.notes" rows="2"></textarea>
+                </div>
+              </div>
+              <div class="copy-card-btns mt-2">
+                <button type="button" class="btn btn-primary btn-sm" @click="saveCopyForm" :disabled="copySaving">
+                  {{ copySaving ? '...' : 'Save' }}
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" @click="editingCopyId = null">Cancel</button>
+              </div>
+            </template>
+
+            <!-- Display mode -->
+            <template v-else>
+              <div class="copy-card-header">
+                <span class="copy-card-num">Copy {{ idx + 1 }}</span>
+                <div class="copy-card-actions">
+                  <button type="button" class="btn btn-sm btn-secondary" @click="startEditCopy(copy)" title="Edit">✎</button>
+                  <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" :disabled="copies.length <= 1" title="Delete">✕</button>
+                </div>
+              </div>
+              <div class="copy-fields">
+                <div v-if="copy.condition" class="copy-field">
+                  <span class="copy-field-label">Condition</span>
+                  <span>{{ copy.condition }}</span>
+                </div>
+                <div v-if="copy.completeness" class="copy-field">
+                  <span class="copy-field-label">Completeness</span>
+                  <span>{{ copy.completeness }}</span>
+                </div>
+                <div v-if="copy.purchase_price" class="copy-field">
+                  <span class="copy-field-label">Paid</span>
+                  <span>€{{ copy.purchase_price }}</span>
+                </div>
+                <div v-if="copy.purchase_date" class="copy-field">
+                  <span class="copy-field-label">Date</span>
+                  <span>{{ copy.purchase_date }}</span>
+                </div>
+                <div v-if="copy.location" class="copy-field">
+                  <span class="copy-field-label">Location</span>
+                  <span>{{ copy.location }}</span>
+                </div>
+              </div>
+              <div v-if="copy.notes" class="copy-card-notes">{{ copy.notes }}</div>
+            </template>
+          </div>
+
+          <!-- Add new copy -->
+          <div v-if="addingCopy" class="copy-card copy-card-new">
+            <div class="copy-card-title">New Copy</div>
+            <div class="copy-form-fields">
+              <div class="copy-form-row">
+                <label>Condition</label>
+                <select v-model="copyForm.condition">
+                  <option value="">—</option>
+                  <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
+                </select>
+              </div>
+              <div class="copy-form-row">
+                <label>Completeness</label>
+                <select v-model="copyForm.completeness">
+                  <option value="">—</option>
+                  <option>New/Sealed</option><option>CIB (Complete In Box)</option>
+                  <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                </select>
+              </div>
+              <div class="copy-form-row">
+                <label>Price (€)</label>
+                <input v-model.number="copyForm.purchase_price" type="number" step="0.01" />
+              </div>
+              <div class="copy-form-row">
+                <label>Purchase Date</label>
+                <input v-model="copyForm.purchase_date" type="date" />
+              </div>
+              <div class="copy-form-row">
+                <label>Location</label>
+                <input v-model="copyForm.location" placeholder="Shelf A…" />
+              </div>
+              <div class="copy-form-row">
+                <label>Notes</label>
+                <textarea v-model="copyForm.notes" rows="2"></textarea>
+              </div>
+            </div>
+            <div class="copy-card-btns mt-2">
+              <button type="button" class="btn btn-primary btn-sm" @click="saveCopyForm" :disabled="copySaving">
+                {{ copySaving ? '...' : 'Add Copy' }}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="addingCopy = false">Cancel</button>
+            </div>
+          </div>
+          <button v-else type="button" class="copy-card copy-card-add" @click="startAddCopy">
+            <span class="copy-add-icon">+</span>
+            <span class="copy-add-label">Add Copy</span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Barcode Scanner Modal -->
@@ -985,12 +1119,88 @@ async function startCamera() {
 
 
 
+const copies = ref([])
+const editingCopyId = ref(null)
+const addingCopy = ref(false)
+const copySaving = ref(false)
+const copyForm = ref({
+  condition: '', completeness: '',
+  purchase_price: null, purchase_date: '', location: '', notes: ''
+})
+
+function startAddCopy() {
+  editingCopyId.value = null
+  copyForm.value = { condition: '', completeness: '', purchase_price: null, purchase_date: '', location: '', notes: '' }
+  addingCopy.value = true
+}
+
+function startEditCopy(copy) {
+  addingCopy.value = false
+  copyForm.value = {
+    condition: copy.condition || '',
+    completeness: copy.completeness || '',
+    purchase_price: copy.purchase_price ?? null,
+    purchase_date: copy.purchase_date || '',
+    location: copy.location || '',
+    notes: copy.notes || ''
+  }
+  editingCopyId.value = copy.id
+}
+
+async function saveCopyForm() {
+  copySaving.value = true
+  try {
+    const payload = { ...copyForm.value }
+    let res
+    if (editingCopyId.value !== null) {
+      res = await gamesApi.updateCopy(editId.value, editingCopyId.value, payload)
+    } else {
+      res = await gamesApi.addCopy(editId.value, payload)
+    }
+    if (res.ok) {
+      notifySuccess(editingCopyId.value !== null ? 'Copy updated.' : 'Copy added.')
+      editingCopyId.value = null
+      addingCopy.value = false
+      const fresh = await gamesApi.get(editId.value)
+      if (fresh.ok) copies.value = fresh.data.copies || []
+    } else {
+      const detail = res.data?.detail
+      notifyError(detail?.message || detail || 'Failed to save copy.')
+    }
+  } catch (e) {
+    console.error('Failed to save copy:', e)
+    notifyError('Failed to save copy.')
+  } finally {
+    copySaving.value = false
+  }
+}
+
+async function deleteCopy(copyId) {
+  if (!confirm('Delete this copy?')) return
+  try {
+    const res = await gamesApi.deleteCopy(editId.value, copyId)
+    if (res.ok) {
+      notifySuccess('Copy deleted.')
+      const fresh = await gamesApi.get(editId.value)
+      if (fresh.ok) copies.value = fresh.data.copies || []
+    } else {
+      const detail = res.data?.detail
+      notifyError(detail?.message || detail || 'Failed to delete copy.')
+    }
+  } catch (e) {
+    console.error('Failed to delete copy:', e)
+    notifyError('Failed to delete copy.')
+  }
+}
+
 onMounted(async () => {
   await loadPlatforms()
   if (route.params.id) {
     isEditMode.value = true
     editId.value = route.params.id
     await loadGame(route.params.id)
+    const res = await gamesApi.get(route.params.id)
+    if (res.ok) copies.value = res.data.copies || []
   }
 })
 
@@ -1378,5 +1588,194 @@ onUnmounted(() => {
   .form-actions a {
     width: 100%;
   }
+
+  .copy-card {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}
+
+/* ── Copies section (edit mode) ── */
+.copies-section {
+  background: var(--bg-light);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  backdrop-filter: var(--card-blur);
+  -webkit-backdrop-filter: var(--card-blur);
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  margin-top: 1.5rem;
+}
+
+.copies-section:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.45);
+  border-color: var(--glass-border-hover);
+}
+
+.copies-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed var(--glass-border);
+  letter-spacing: -0.01em;
+}
+
+.copies-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.copy-card {
+  flex: 1 1 200px;
+  min-width: 180px;
+  max-width: 280px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.copy-card:not(.copy-card-add):not(.copy-card-new):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(0, 0, 0, 0.35);
+  border-color: var(--glass-border-hover);
+}
+
+.copy-card-add {
+  background: transparent;
+  border: 2px dashed var(--glass-border);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  gap: 0.35rem;
+  transition: border-color 0.2s, color 0.2s;
+  min-height: 90px;
+}
+
+.copy-card-add:hover {
+  border-color: var(--primary, #6366f1);
+  color: var(--text);
+}
+
+.copy-add-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.copy-add-label {
+  font-size: 0.8rem;
+}
+
+.copy-card-new {
+  border-style: solid;
+  border-color: var(--primary, #6366f1);
+}
+
+.copy-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.copy-card-num {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.copy-card-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.copy-card-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.copy-card-btns {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.copy-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.copy-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.copy-field-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.copy-card-notes {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  border-top: 1px dashed var(--glass-border);
+  padding-top: 0.4rem;
+  word-break: break-word;
+}
+
+.copy-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.copy-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.copy-form-row label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.copy-form-row select,
+.copy-form-row input,
+.copy-form-row textarea {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.28rem 0.4rem;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 0.35rem;
+  color: var(--text);
+}
+
+.copy-form-row textarea {
+  resize: vertical;
 }
 </style>

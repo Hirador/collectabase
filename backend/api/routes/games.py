@@ -107,15 +107,12 @@ async def create_game(game: GameCreate, force: bool = False):
         game_id = cursor.lastrowid
         db.execute(
             """INSERT INTO game_copies
-                   (game_id, condition, completeness, region, barcode,
-                    purchase_price, purchase_date, location, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (game_id, condition, completeness, purchase_price, purchase_date, location, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 game_id,
                 game.condition,
                 game.completeness,
-                game.region,
-                game.barcode,
                 game.purchase_price,
                 game.purchase_date,
                 game.location,
@@ -255,15 +252,13 @@ async def update_game(game_id: int, game: GameUpdate):
         if first_copy:
             db.execute(
                 """UPDATE game_copies SET
-                       condition = ?, completeness = ?, region = ?, barcode = ?,
+                       condition = ?, completeness = ?,
                        purchase_price = ?, purchase_date = ?, location = ?, notes = ?,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE id = ?""",
                 (
                     merged["condition"],
                     merged["completeness"],
-                    merged["region"],
-                    merged["barcode"],
                     merged["purchase_price"],
                     merged["purchase_date"],
                     merged["location"],
@@ -381,15 +376,12 @@ async def add_copy(game_id: int, copy: CopyCreate):
             raise not_found("Game not found")
         cursor = db.execute(
             """INSERT INTO game_copies
-                   (game_id, condition, completeness, region, barcode,
-                    purchase_price, purchase_date, location, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (game_id, condition, completeness, purchase_price, purchase_date, location, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 game_id,
                 copy.condition,
                 copy.completeness,
-                copy.region,
-                copy.barcode,
                 copy.purchase_price,
                 copy.purchase_date,
                 copy.location,
@@ -403,8 +395,6 @@ async def add_copy(game_id: int, copy: CopyCreate):
             "game_id": game_id,
             "condition": copy.condition,
             "completeness": copy.completeness,
-            "region": copy.region,
-            "barcode": copy.barcode,
             "purchase_price": copy.purchase_price,
             "purchase_date": copy.purchase_date,
             "location": copy.location,
@@ -424,8 +414,6 @@ async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
         merged = {
             "condition": copy.condition if copy.condition is not None else existing_data["condition"],
             "completeness": copy.completeness if copy.completeness is not None else existing_data["completeness"],
-            "region": copy.region if copy.region is not None else existing_data["region"],
-            "barcode": copy.barcode if copy.barcode is not None else existing_data["barcode"],
             "purchase_price": copy.purchase_price if copy.purchase_price is not None else existing_data["purchase_price"],
             "purchase_date": copy.purchase_date if copy.purchase_date is not None else existing_data["purchase_date"],
             "location": copy.location if copy.location is not None else existing_data["location"],
@@ -433,12 +421,12 @@ async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
         }
         db.execute(
             """UPDATE game_copies SET
-                   condition = ?, completeness = ?, region = ?, barcode = ?,
+                   condition = ?, completeness = ?,
                    purchase_price = ?, purchase_date = ?, location = ?, notes = ?,
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = ?""",
             (
-                merged["condition"], merged["completeness"], merged["region"], merged["barcode"],
+                merged["condition"], merged["completeness"],
                 merged["purchase_price"], merged["purchase_date"], merged["location"], merged["notes"],
                 copy_id,
             ),
@@ -449,8 +437,6 @@ async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
             "game_id": game_id,
             "condition": merged["condition"],
             "completeness": merged["completeness"],
-            "region": merged["region"],
-            "barcode": merged["barcode"],
             "purchase_price": merged["purchase_price"],
             "purchase_date": merged["purchase_date"],
             "location": merged["location"],

@@ -124,6 +124,10 @@
                 <label>Region</label>
                 <span>{{ game.region }}</span>
               </div>
+              <div v-if="game.barcode" class="detail-item">
+                <label>Barcode</label>
+                <span>{{ game.barcode }}</span>
+              </div>
               <div v-if="game.release_date" class="detail-item">
                 <label>Release Date</label>
                 <span>{{ game.release_date }}</span>
@@ -167,137 +171,157 @@
             </div>
           </div>
 
-          <!-- MY COPIES CARD -->
-          <div class="chunk-card copies-card">
-            <div class="copies-header">
-              <h3 class="chunk-title m-0">My Copies ({{ copies.length }})</h3>
-              <button type="button" class="btn btn-primary btn-sm" @click="openAddCopyForm">+ Add Copy</button>
+        </div>
+
+        <!-- MY COPIES — horizontal cards -->
+        <div class="copies-section">
+          <h3 class="chunk-title">My Copies ({{ copies.length }})</h3>
+          <div class="copies-row">
+            <!-- Existing copy cards -->
+            <div v-for="(copy, idx) in copies" :key="copy.id" class="copy-card">
+              <!-- Edit mode -->
+              <template v-if="editingCopyId === copy.id">
+                <div class="copy-card-title">Edit Copy {{ idx + 1 }}</div>
+                <div class="copy-form-fields">
+                  <div class="copy-form-row">
+                    <label>Condition</label>
+                    <select v-model="copyForm.condition">
+                      <option value="">—</option>
+                      <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
+                    </select>
+                  </div>
+                  <div class="copy-form-row">
+                    <label>Completeness</label>
+                    <select v-model="copyForm.completeness">
+                      <option value="">—</option>
+                      <option>New/Sealed</option><option>CIB (Complete In Box)</option>
+                      <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                    </select>
+                  </div>
+                  <div class="copy-form-row">
+                    <label>Price (€)</label>
+                    <input v-model.number="copyForm.purchase_price" type="number" step="0.01" />
+                  </div>
+                  <div class="copy-form-row">
+                    <label>Purchase Date</label>
+                    <input v-model="copyForm.purchase_date" type="date" />
+                  </div>
+                  <div class="copy-form-row">
+                    <label>Location</label>
+                    <input v-model="copyForm.location" placeholder="Shelf A…" />
+                  </div>
+                  <div class="copy-form-row">
+                    <label>Notes</label>
+                    <textarea v-model="copyForm.notes" rows="2"></textarea>
+                  </div>
+                </div>
+                <div class="copy-card-btns mt-2">
+                  <button type="button" class="btn btn-primary btn-sm" @click="saveCopyForm" :disabled="copySaving">
+                    {{ copySaving ? '...' : 'Save' }}
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="editingCopyId = null">Cancel</button>
+                </div>
+              </template>
+
+              <!-- Display mode -->
+              <template v-else>
+                <div class="copy-card-header">
+                  <span class="copy-card-num">Copy {{ idx + 1 }}</span>
+                  <div class="copy-card-actions">
+                    <button type="button" class="btn btn-sm btn-secondary" @click="startEditCopy(copy)" title="Edit">✎</button>
+                    <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" :disabled="copies.length <= 1" title="Delete">✕</button>
+                  </div>
+                </div>
+                <div class="copy-fields">
+                  <div v-if="copy.condition" class="copy-field">
+                    <span class="copy-field-label">Condition</span>
+                    <span>{{ copy.condition }}</span>
+                  </div>
+                  <div v-if="copy.completeness" class="copy-field">
+                    <span class="copy-field-label">Completeness</span>
+                    <span>{{ copy.completeness }}</span>
+                  </div>
+                  <div v-if="copy.purchase_price" class="copy-field">
+                    <span class="copy-field-label">Paid</span>
+                    <span>€{{ copy.purchase_price }}</span>
+                  </div>
+                  <div v-if="copy.purchase_date" class="copy-field">
+                    <span class="copy-field-label">Date</span>
+                    <span>{{ copy.purchase_date }}</span>
+                  </div>
+                  <div v-if="copy.location" class="copy-field">
+                    <span class="copy-field-label">Location</span>
+                    <span>{{ copy.location }}</span>
+                  </div>
+                  <div v-if="game.current_value && copy.purchase_price" class="copy-field copy-pl-row">
+                    <span class="copy-field-label">P/L</span>
+                    <span class="pl-pill" :class="game.current_value >= copy.purchase_price ? 'profit' : 'loss'">
+                      {{ game.current_value >= copy.purchase_price ? '↑' : '↓' }}
+                      €{{ Math.abs(game.current_value - copy.purchase_price).toFixed(2) }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="copy.notes" class="copy-card-notes">{{ copy.notes }}</div>
+              </template>
             </div>
 
-            <div v-if="copies.length === 0" class="text-muted text-sm mt-2">No copies tracked yet.</div>
-
-            <div v-for="(copy, idx) in copies" :key="copy.id" class="copy-row">
-              <div class="copy-row-header">
-                <span class="copy-label">Copy {{ idx + 1 }}</span>
-                <div class="copy-row-actions">
-                  <button type="button" class="btn btn-sm btn-secondary" @click="openEditCopyForm(copy)">Edit</button>
-                  <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" :disabled="copies.length <= 1">Delete</button>
-                </div>
-              </div>
-              <div class="details-grid">
-                <div v-if="copy.condition" class="detail-item">
-                  <label>Condition</label>
-                  <span>{{ copy.condition }}</span>
-                </div>
-                <div v-if="copy.completeness" class="detail-item">
-                  <label>Completeness</label>
-                  <span>{{ copy.completeness }}</span>
-                </div>
-                <div v-if="copy.region" class="detail-item">
-                  <label>Region</label>
-                  <span>{{ copy.region }}</span>
-                </div>
-                <div v-if="copy.barcode" class="detail-item">
-                  <label>Barcode</label>
-                  <span>{{ copy.barcode }}</span>
-                </div>
-                <div v-if="copy.location" class="detail-item">
-                  <label>Location</label>
-                  <span>{{ copy.location }}</span>
-                </div>
-                <div v-if="copy.purchase_date" class="detail-item">
-                  <label>Purchase Date</label>
-                  <span>{{ copy.purchase_date }}</span>
-                </div>
-                <div v-if="copy.purchase_price" class="detail-item">
-                  <label>Purchase Price</label>
-                  <span>€{{ copy.purchase_price }}</span>
-                </div>
-                <div v-if="game.current_value && copy.purchase_price" class="detail-item detail-item-pl">
-                  <label>Profit / Loss</label>
-                  <span class="pl-pill" :class="game.current_value >= copy.purchase_price ? 'profit' : 'loss'">
-                    {{ game.current_value >= copy.purchase_price ? '↑' : '↓' }}
-                    €{{ Math.abs(game.current_value - copy.purchase_price).toFixed(2) }}
-                  </span>
-                </div>
-              </div>
-              <div v-if="copy.notes" class="copy-notes">{{ copy.notes }}</div>
-            </div>
-
-            <!-- Inline copy form -->
-            <div v-if="copyFormOpen" class="copy-form">
-              <h4 class="copy-form-title">{{ editingCopyId ? 'Edit Copy' : 'Add Copy' }}</h4>
-              <div class="form-grid">
-                <div class="form-group">
+            <!-- Add new copy: inline form card OR trigger card -->
+            <div v-if="addingCopy" class="copy-card copy-card-new">
+              <div class="copy-card-title">New Copy</div>
+              <div class="copy-form-fields">
+                <div class="copy-form-row">
                   <label>Condition</label>
                   <select v-model="copyForm.condition">
-                    <option value="">Select</option>
-                    <option>Mint</option>
-                    <option>Good</option>
-                    <option>Fair</option>
-                    <option>Poor</option>
+                    <option value="">—</option>
+                    <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
                   </select>
                 </div>
-                <div class="form-group">
+                <div class="copy-form-row">
                   <label>Completeness</label>
                   <select v-model="copyForm.completeness">
-                    <option value="">Select</option>
-                    <option>New/Sealed</option>
-                    <option>CIB (Complete In Box)</option>
-                    <option>Box + Game</option>
-                    <option>Game + Manual</option>
-                    <option>Loose</option>
+                    <option value="">—</option>
+                    <option>New/Sealed</option><option>CIB (Complete In Box)</option>
+                    <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
                   </select>
                 </div>
-                <div class="form-group">
-                  <label>Region</label>
-                  <select v-model="copyForm.region">
-                    <option value="">Select</option>
-                    <option>PAL</option>
-                    <option>NTSC</option>
-                    <option>EU</option>
-                    <option>US</option>
-                    <option>JP</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Barcode</label>
-                  <input v-model="copyForm.barcode" />
-                </div>
-                <div class="form-group">
-                  <label>Purchase Price (€)</label>
+                <div class="copy-form-row">
+                  <label>Price (€)</label>
                   <input v-model.number="copyForm.purchase_price" type="number" step="0.01" />
                 </div>
-                <div class="form-group">
+                <div class="copy-form-row">
                   <label>Purchase Date</label>
                   <input v-model="copyForm.purchase_date" type="date" />
                 </div>
-                <div class="form-group">
+                <div class="copy-form-row">
                   <label>Location</label>
-                  <input v-model="copyForm.location" placeholder="e.g. Shelf A, Box 3" />
+                  <input v-model="copyForm.location" placeholder="Shelf A…" />
                 </div>
-                <div class="form-group full-width">
+                <div class="copy-form-row">
                   <label>Notes</label>
                   <textarea v-model="copyForm.notes" rows="2"></textarea>
                 </div>
               </div>
-              <div class="copy-form-actions">
-                <button type="button" class="btn btn-primary" @click="saveCopyForm" :disabled="copySaving">
-                  {{ copySaving ? 'Saving...' : (editingCopyId ? 'Update Copy' : 'Add Copy') }}
+              <div class="copy-card-btns mt-2">
+                <button type="button" class="btn btn-primary btn-sm" @click="saveCopyForm" :disabled="copySaving">
+                  {{ copySaving ? '...' : 'Add Copy' }}
                 </button>
-                <button type="button" class="btn btn-secondary" @click="cancelCopyForm">Cancel</button>
+                <button type="button" class="btn btn-secondary btn-sm" @click="addingCopy = false">Cancel</button>
               </div>
             </div>
+            <button v-else type="button" class="copy-card copy-card-add" @click="startAddCopy">
+              <span class="copy-add-icon">+</span>
+              <span class="copy-add-label">Add Copy</span>
+            </button>
           </div>
         </div>
 
-        <div v-if="game.description" class="notes mt-3 card">
+        <div v-if="game.description" class="notes card">
           <label>Description</label>
           <p class="description-text" v-html="formattedDescription"></p>
         </div>
 
         <!-- MARKET PRICES -->
-        <div class="price-section card mt-3">
+        <div class="price-section card">
           <div class="price-section-header flex flex-between items-center mb-2">
             <h3 class="chunk-title m-0">Market Prices</h3>
             <div class="actions-compact">
@@ -536,11 +560,11 @@ const coverHasError = ref(false)
 const coverAutoFixing = ref(false)
 const coverAutoEnrichTried = ref(false)
 const copies = ref([])
-const copyFormOpen = ref(false)
 const editingCopyId = ref(null)
+const addingCopy = ref(false)
 const copySaving = ref(false)
 const copyForm = ref({
-  condition: '', completeness: '', region: '', barcode: '',
+  condition: '', completeness: '',
   purchase_price: null, purchase_date: '', location: '', notes: ''
 })
 let chartInstance = null
@@ -1045,30 +1069,23 @@ async function loadGame() {
   }
 }
 
-function openAddCopyForm() {
+function startAddCopy() {
   editingCopyId.value = null
-  copyForm.value = { condition: '', completeness: '', region: '', barcode: '', purchase_price: null, purchase_date: '', location: '', notes: '' }
-  copyFormOpen.value = true
+  copyForm.value = { condition: '', completeness: '', purchase_price: null, purchase_date: '', location: '', notes: '' }
+  addingCopy.value = true
 }
 
-function openEditCopyForm(copy) {
-  editingCopyId.value = copy.id
+function startEditCopy(copy) {
+  addingCopy.value = false
   copyForm.value = {
     condition: copy.condition || '',
     completeness: copy.completeness || '',
-    region: copy.region || '',
-    barcode: copy.barcode || '',
     purchase_price: copy.purchase_price ?? null,
     purchase_date: copy.purchase_date || '',
     location: copy.location || '',
     notes: copy.notes || ''
   }
-  copyFormOpen.value = true
-}
-
-function cancelCopyForm() {
-  copyFormOpen.value = false
-  editingCopyId.value = null
+  editingCopyId.value = copy.id
 }
 
 async function saveCopyForm() {
@@ -1076,15 +1093,15 @@ async function saveCopyForm() {
   try {
     const payload = { ...copyForm.value }
     let res
-    if (editingCopyId.value) {
+    if (editingCopyId.value !== null) {
       res = await gamesApi.updateCopy(route.params.id, editingCopyId.value, payload)
     } else {
       res = await gamesApi.addCopy(route.params.id, payload)
     }
     if (res.ok) {
-      notifySuccess(editingCopyId.value ? 'Copy updated.' : 'Copy added.')
-      copyFormOpen.value = false
+      notifySuccess(editingCopyId.value !== null ? 'Copy updated.' : 'Copy added.')
       editingCopyId.value = null
+      addingCopy.value = false
       await loadGame()
     } else {
       const detail = res.data?.detail
@@ -1751,7 +1768,6 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1.5rem;
-  margin-top: 1rem;
 }
 
 .chunk-card {
@@ -1762,6 +1778,13 @@ onMounted(async () => {
   backdrop-filter: var(--card-blur);
   -webkit-backdrop-filter: var(--card-blur);
   box-shadow: var(--glass-shadow);
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.chunk-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.45);
+  border-color: var(--glass-border-hover);
 }
 
 .chunk-title {
@@ -2120,33 +2143,89 @@ onMounted(async () => {
   font-size: 0.85rem;
 }
 
-.copies-header {
+/* ── Horizontal copy cards ── */
+.copies-section {
+  background: var(--bg-light);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  backdrop-filter: var(--card-blur);
+  -webkit-backdrop-filter: var(--card-blur);
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.copies-section:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.45);
+  border-color: var(--glass-border-hover);
+}
+
+.copies-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.copy-card {
+  flex: 1 1 200px;
+  min-width: 180px;
+  max-width: 280px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.copy-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(0, 0, 0, 0.35);
+  border-color: var(--glass-border-hover);
+}
+
+.copy-card-add {
+  background: transparent;
+  border: 2px dashed var(--glass-border);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  gap: 0.35rem;
+  transition: border-color 0.2s, color 0.2s;
+  min-height: 90px;
+}
+
+.copy-card-add:hover {
+  border-color: var(--primary, #6366f1);
+  color: var(--text);
+}
+
+.copy-add-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.copy-add-label {
+  font-size: 0.8rem;
+}
+
+.copy-card-new {
+  border-style: solid;
+  border-color: var(--primary, #6366f1);
+}
+
+.copy-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
 }
 
-.copy-row {
-  padding-bottom: 1.25rem;
-  margin-bottom: 1.25rem;
-  border-bottom: 1px dashed var(--glass-border);
-}
-
-.copy-row:last-of-type {
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: none;
-}
-
-.copy-row-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.copy-label {
+.copy-card-num {
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -2154,35 +2233,96 @@ onMounted(async () => {
   color: var(--text-muted);
 }
 
-.copy-row-actions {
+.copy-card-actions {
   display: flex;
+  gap: 0.3rem;
+}
+
+.copy-card-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.15rem;
+}
+
+.copy-card-btns {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.copy-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.copy-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.copy-field-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.copy-card-notes {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  border-top: 1px dashed var(--glass-border);
+  padding-top: 0.4rem;
+  margin-top: 0.1rem;
+  word-break: break-word;
+}
+
+.copy-form-fields {
+  display: flex;
+  flex-direction: column;
   gap: 0.4rem;
 }
 
-.copy-notes {
-  margin-top: 0.6rem;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.copy-form {
-  margin-top: 1.25rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--glass-border);
-}
-
-.copy-form-title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  margin: 0 0 0.75rem;
-}
-
-.copy-form-actions {
+.copy-form-row {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.copy-form-row label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.copy-form-row select,
+.copy-form-row input,
+.copy-form-row textarea {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.28rem 0.4rem;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 0.35rem;
+  color: var(--text);
+}
+
+.copy-form-row textarea {
+  resize: vertical;
+}
+
+@media (max-width: 639px) {
+  .copy-card {
+    flex: 1 1 100%;
+    max-width: none;
+  }
 }
 
 @media (max-width: 639px) {
