@@ -58,9 +58,9 @@
           <h3>{{ game.title }}</h3>
           <p class="text-muted">{{ game.platform_name }}</p>
           <div class="meta">
-            <span v-if="game.condition" class="badge">{{ game.condition }}</span>
-            <span v-if="game.completeness" class="badge">{{ game.completeness }}</span>
             <span v-if="game.item_type" class="badge type-badge">{{ typeLabel(game.item_type) }}</span>
+            <span v-if="game.region" class="badge">{{ game.region }}</span>
+            <span v-if="game.copies_count > 1" class="badge copies-badge">{{ game.copies_count }} copies</span>
           </div>
           <p v-if="game.current_value" class="value">€{{ game.current_value }}</p>
         </div>
@@ -300,6 +300,12 @@ onMounted(() => store.load())
 .type-badge {
   background: var(--primary, #6366f1);
   color: white;
+}
+
+.copies-badge {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--primary, #6366f1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
 }
 
 </style>
