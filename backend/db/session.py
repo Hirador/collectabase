@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 def get_database_url() -> str:
@@ -15,6 +15,12 @@ def get_database_url() -> str:
     return f"sqlite:///{local_db_path.replace(chr(92), '/')}"
 
 engine = create_engine(get_database_url(), connect_args={"check_same_thread": False})
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, _):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON")
+    cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_session():
