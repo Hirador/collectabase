@@ -456,10 +456,12 @@ async def delete_copy(game_id: int, copy_id: int):
             "SELECT COUNT(*) FROM game_copies WHERE game_id = ?", (game_id,)
         ).fetchone()[0]
         if count <= 1:
-            raise conflict("Cannot delete the last copy of a game")
+            db.execute("DELETE FROM games WHERE id = ?", (game_id,))
+            db.commit()
+            return {"message": "Game deleted", "game_deleted": True}
         db.execute("DELETE FROM game_copies WHERE id = ?", (copy_id,))
         db.commit()
-        return {"message": "Copy deleted"}
+        return {"message": "Copy deleted", "game_deleted": False}
 
 
 @router.get("/api/platforms")

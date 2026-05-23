@@ -289,6 +289,96 @@
         </div>
       </form>
 
+      <!-- ADDITIONAL COPIES — add mode only -->
+      <div v-if="!isEditMode" class="copies-section mt-3">
+        <h3 class="copies-title">Additional Copies ({{ extraCopies.length + 1 }} total)</h3>
+        <div class="copies-row">
+          <div class="copy-card copy-card-form-ref">
+            <div class="copy-card-header">
+              <span class="copy-card-num">Copy 1</span>
+            </div>
+            <div class="copy-card-notes copy-card-ref-label">Fields filled above</div>
+          </div>
+
+          <div v-for="(copy, idx) in extraCopies" :key="idx" class="copy-card">
+            <div class="copy-card-header">
+              <span class="copy-card-num">Copy {{ idx + 2 }}</span>
+              <div class="copy-card-actions">
+                <button type="button" class="btn btn-sm btn-danger" @click="removeExtraCopy(idx)" title="Remove">✕</button>
+              </div>
+            </div>
+            <div class="copy-fields">
+              <div v-if="copy.condition" class="copy-field">
+                <span class="copy-field-label">Condition</span>
+                <span>{{ copy.condition }}</span>
+              </div>
+              <div v-if="copy.completeness" class="copy-field">
+                <span class="copy-field-label">Completeness</span>
+                <span>{{ copy.completeness }}</span>
+              </div>
+              <div v-if="copy.purchase_price" class="copy-field">
+                <span class="copy-field-label">Paid</span>
+                <span>€{{ copy.purchase_price }}</span>
+              </div>
+              <div v-if="copy.purchase_date" class="copy-field">
+                <span class="copy-field-label">Date</span>
+                <span>{{ copy.purchase_date }}</span>
+              </div>
+              <div v-if="copy.location" class="copy-field">
+                <span class="copy-field-label">Location</span>
+                <span>{{ copy.location }}</span>
+              </div>
+            </div>
+            <div v-if="copy.notes" class="copy-card-notes">{{ copy.notes }}</div>
+          </div>
+
+          <div v-if="addingExtraCopy" class="copy-card copy-card-new">
+            <div class="copy-card-title">New Copy</div>
+            <div class="copy-form-fields">
+              <div class="copy-form-row">
+                <label>Condition</label>
+                <select v-model="extraCopyForm.condition">
+                  <option value="">—</option>
+                  <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
+                </select>
+              </div>
+              <div class="copy-form-row">
+                <label>Completeness</label>
+                <select v-model="extraCopyForm.completeness">
+                  <option value="">—</option>
+                  <option>New/Sealed</option><option>CIB (Complete In Box)</option>
+                  <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                </select>
+              </div>
+              <div class="copy-form-row">
+                <label>Price (€)</label>
+                <input v-model.number="extraCopyForm.purchase_price" type="number" step="0.01" />
+              </div>
+              <div class="copy-form-row">
+                <label>Purchase Date</label>
+                <input v-model="extraCopyForm.purchase_date" type="date" />
+              </div>
+              <div class="copy-form-row">
+                <label>Location</label>
+                <input v-model="extraCopyForm.location" placeholder="Shelf A…" />
+              </div>
+              <div class="copy-form-row">
+                <label>Notes</label>
+                <textarea v-model="extraCopyForm.notes" rows="2"></textarea>
+              </div>
+            </div>
+            <div class="copy-card-btns mt-2">
+              <button type="button" class="btn btn-primary btn-sm" @click="confirmExtraCopy">Add Copy</button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="addingExtraCopy = false">Cancel</button>
+            </div>
+          </div>
+          <button v-else type="button" class="copy-card copy-card-add" @click="startAddExtraCopy">
+            <span class="copy-add-icon">+</span>
+            <span class="copy-add-label">Add Copy</span>
+          </button>
+        </div>
+      </div>
+
       <!-- MY COPIES — edit mode only -->
       <div v-if="isEditMode" class="copies-section mt-3">
         <h3 class="copies-title">My Copies ({{ copies.length }})</h3>
@@ -344,7 +434,7 @@
                 <span class="copy-card-num">Copy {{ idx + 1 }}</span>
                 <div class="copy-card-actions">
                   <button type="button" class="btn btn-sm btn-secondary" @click="startEditCopy(copy)" title="Edit">✎</button>
-                  <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" :disabled="copies.length <= 1" title="Delete">✕</button>
+                  <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" title="Delete">✕</button>
                 </div>
               </div>
               <div class="copy-fields">
@@ -978,6 +1068,12 @@ async function saveGame() {
     }
     if (res.ok) {
       saveForced.value = false
+      if (!isEditMode.value && extraCopies.value.length > 0) {
+        const newId = res.data.id
+        for (const copy of extraCopies.value) {
+          await gamesApi.addCopy(newId, copy)
+        }
+      }
       notifySuccess(isEditMode.value ? 'Game updated.' : 'Game created.')
       // Invalidate the Pinia cache so GamesList reflects the change immediately
       useGameStore().refresh()
@@ -1128,6 +1224,24 @@ const copyForm = ref({
   purchase_price: null, purchase_date: '', location: '', notes: ''
 })
 
+const extraCopies = ref([])
+const addingExtraCopy = ref(false)
+const extraCopyForm = ref({ condition: '', completeness: '', purchase_price: null, purchase_date: '', location: '', notes: '' })
+
+function startAddExtraCopy() {
+  extraCopyForm.value = { condition: '', completeness: '', purchase_price: null, purchase_date: '', location: '', notes: '' }
+  addingExtraCopy.value = true
+}
+
+function confirmExtraCopy() {
+  extraCopies.value.push({ ...extraCopyForm.value })
+  addingExtraCopy.value = false
+}
+
+function removeExtraCopy(idx) {
+  extraCopies.value.splice(idx, 1)
+}
+
 function startAddCopy() {
   editingCopyId.value = null
   copyForm.value = { condition: '', completeness: '', purchase_price: null, purchase_date: '', location: '', notes: '' }
@@ -1176,13 +1290,23 @@ async function saveCopyForm() {
 }
 
 async function deleteCopy(copyId) {
-  if (!confirm('Delete this copy?')) return
+  const isLast = copies.value.length <= 1
+  const msg = isLast
+    ? 'This is the last copy. Deleting it will remove the entire item. Continue?'
+    : 'Delete this copy?'
+  if (!confirm(msg)) return
   try {
     const res = await gamesApi.deleteCopy(editId.value, copyId)
     if (res.ok) {
-      notifySuccess('Copy deleted.')
-      const fresh = await gamesApi.get(editId.value)
-      if (fresh.ok) copies.value = fresh.data.copies || []
+      if (res.data?.game_deleted) {
+        notifySuccess('Item deleted.')
+        useGameStore().refresh()
+        router.push('/')
+      } else {
+        notifySuccess('Copy deleted.')
+        const fresh = await gamesApi.get(editId.value)
+        if (fresh.ok) copies.value = fresh.data.copies || []
+      }
     } else {
       const detail = res.data?.detail
       notifyError(detail?.message || detail || 'Failed to delete copy.')
@@ -1680,6 +1804,18 @@ onUnmounted(() => {
 .copy-card-new {
   border-style: solid;
   border-color: var(--primary, #6366f1);
+}
+
+.copy-card-form-ref {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.copy-card-ref-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 0.25rem;
 }
 
 .copy-card-header {

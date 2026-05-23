@@ -229,7 +229,7 @@
                   <span class="copy-card-num">Copy {{ idx + 1 }}</span>
                   <div class="copy-card-actions">
                     <button type="button" class="btn btn-sm btn-secondary" @click="startEditCopy(copy)" title="Edit">✎</button>
-                    <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" :disabled="copies.length <= 1" title="Delete">✕</button>
+                    <button type="button" class="btn btn-sm btn-danger" @click="deleteCopy(copy.id)" title="Delete">✕</button>
                   </div>
                 </div>
                 <div class="copy-fields">
@@ -510,6 +510,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { gamesApi, lookupApi, priceApi } from '../api'
+import { useGameStore } from '../stores/useGameStore'
 import { notifyError, notifySuccess } from '../composables/useNotifications'
 import { coverEmoji, isSvgDataCover, makeFallbackCoverDataUrl, needsAutoCover } from '../utils/coverFallback'
 import {
@@ -1116,12 +1117,22 @@ async function saveCopyForm() {
 }
 
 async function deleteCopy(copyId) {
-  if (!confirm('Delete this copy?')) return
+  const isLast = copies.value.length <= 1
+  const msg = isLast
+    ? 'This is the last copy. Deleting it will remove the entire item. Continue?'
+    : 'Delete this copy?'
+  if (!confirm(msg)) return
   try {
     const res = await gamesApi.deleteCopy(route.params.id, copyId)
     if (res.ok) {
-      notifySuccess('Copy deleted.')
-      await loadGame()
+      if (res.data?.game_deleted) {
+        notifySuccess('Item deleted.')
+        useGameStore().refresh()
+        router.push('/')
+      } else {
+        notifySuccess('Copy deleted.')
+        await loadGame()
+      }
     } else {
       const detail = res.data?.detail
       notifyError(detail?.message || detail || 'Failed to delete copy.')
