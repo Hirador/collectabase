@@ -291,15 +291,9 @@
 
       <!-- ADDITIONAL COPIES — add mode only -->
       <div v-if="!isEditMode" class="copies-section mt-3">
-        <h3 class="copies-title">Additional Copies ({{ extraCopies.length + 1 }} total)</h3>
+        <h3 class="copies-title">Additional Copies</h3>
+        <p class="copies-subtitle">Copy 1 is defined by the fields above. Add more copies here if you own multiple.</p>
         <div class="copies-row">
-          <div class="copy-card copy-card-form-ref">
-            <div class="copy-card-header">
-              <span class="copy-card-num">Copy 1</span>
-            </div>
-            <div class="copy-card-notes copy-card-ref-label">Fields filled above</div>
-          </div>
-
           <div v-for="(copy, idx) in extraCopies" :key="idx" class="copy-card">
             <div class="copy-card-header">
               <span class="copy-card-num">Copy {{ idx + 2 }}</span>
@@ -1806,16 +1800,10 @@ onUnmounted(() => {
   border-color: var(--primary, #6366f1);
 }
 
-.copy-card-form-ref {
-  opacity: 0.65;
-  cursor: default;
-}
-
-.copy-card-ref-label {
-  font-size: 0.72rem;
+.copies-subtitle {
+  font-size: 0.8rem;
   color: var(--text-muted);
-  font-style: italic;
-  margin-top: 0.25rem;
+  margin: -0.4rem 0 0.75rem;
 }
 
 .copy-card-header {
