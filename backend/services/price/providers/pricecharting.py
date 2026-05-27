@@ -42,6 +42,9 @@ async def _fetch_pricecharting_api(title: str, platform_name: str, token: str):
             "loose_usd": loose_usd,
             "cib_usd": cents("cib-price"),
             "new_usd": cents("new-price"),
+            "graded_usd": cents("graded-price"),
+            "box_only_usd": cents("box-only-price"),
+            "manual_only_usd": cents("manual-only-price"),
         }
     except Exception as e:
         print(f"PriceCharting API error for '{query}': {e}")
@@ -155,6 +158,9 @@ async def _fetch_pricecharting_scrape(title: str, platform_name: str):
             "loose_usd": loose_usd,
             "cib_usd": get_price("complete_price"),
             "new_usd": get_price("new_price"),
+            "graded_usd": get_price("graded_price"),
+            "box_only_usd": get_price("box_only_price"),
+            "manual_only_usd": get_price("manual_only_price"),
             "page_url": product_url,
         }
     except Exception as e:

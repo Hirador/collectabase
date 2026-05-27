@@ -62,7 +62,7 @@
             <span v-if="game.region" class="badge">{{ game.region }}</span>
             <span v-if="game.copies_count > 1" class="badge copies-badge">{{ game.copies_count }} copies</span>
           </div>
-          <p v-if="game.current_value" class="value">€{{ game.current_value }}</p>
+          <p v-if="game.copies_total_value != null" class="value">€{{ Number(game.copies_total_value).toFixed(2) }}</p>
         </div>
         <router-link :to="`/game/${game.id}`" class="card-link"></router-link>
       </div>
@@ -150,8 +150,8 @@ function compareText(a, b) {
 function compareGames(a, b, mode) {
   if (mode === 'name_desc') return compareText(b.title, a.title)
   if (mode === 'value_desc') {
-    const av = safeNumber(a.current_value)
-    const bv = safeNumber(b.current_value)
+    const av = safeNumber(a.copies_total_value)
+    const bv = safeNumber(b.copies_total_value)
     if (av == null && bv == null) return compareText(a.title, b.title)
     if (av == null) return 1
     if (bv == null) return -1
@@ -159,8 +159,8 @@ function compareGames(a, b, mode) {
     return compareText(a.title, b.title)
   }
   if (mode === 'value_asc') {
-    const av = safeNumber(a.current_value)
-    const bv = safeNumber(b.current_value)
+    const av = safeNumber(a.copies_total_value)
+    const bv = safeNumber(b.copies_total_value)
     if (av == null && bv == null) return compareText(a.title, b.title)
     if (av == null) return 1
     if (bv == null) return -1

@@ -65,11 +65,6 @@
             </select>
           </div>
 
-          <div v-if="!isEditMode" class="form-group">
-            <label>Quantity</label>
-            <input v-model.number="game.quantity" type="number" min="1" step="1" required />
-          </div>
-
           <div class="form-group">
             <label>Type</label>
             <select v-model="game.item_type">
@@ -116,52 +111,9 @@
             </select>
           </div>
 
-          <div v-if="!isEditMode" class="form-group">
-            <label>Condition</label>
-            <select v-model="game.condition">
-              <option value="">Select</option>
-              <option>Mint</option>
-              <option>Good</option>
-              <option>Fair</option>
-              <option>Poor</option>
-            </select>
-          </div>
-
-          <div v-if="!isEditMode" class="form-group">
-            <label>Completeness</label>
-            <select v-model="game.completeness">
-              <option value="">Select</option>
-              <option>New/Sealed</option>
-              <option>CIB (Complete In Box)</option>
-              <option>Box + Game</option>
-              <option>Game + Manual</option>
-              <option>Loose</option>
-            </select>
-          </div>
-
           <div class="form-group">
             <label>Release Date</label>
             <input v-model="game.release_date" type="date" />
-          </div>
-
-          <div v-if="!isEditMode" class="form-group">
-            <label>Location</label>
-            <input v-model="game.location" placeholder="e.g. Shelf A, Box 3" />
-          </div>
-
-          <div v-if="!isEditMode" class="form-group">
-            <label>Purchase Date</label>
-            <input v-model="game.purchase_date" type="date" />
-          </div>
-
-          <div v-if="!isEditMode" class="form-group">
-            <label>Purchase Price (€)</label>
-            <input v-model.number="game.purchase_price" type="number" step="0.01" />
-          </div>
-
-          <div class="form-group">
-            <label>Current Value (€)</label>
-            <input v-model.number="game.current_value" type="number" step="0.01" />
           </div>
 
           <div class="form-group">
@@ -255,22 +207,37 @@
             <textarea v-model="game.description" rows="3"></textarea>
           </div>
 
-          <div v-if="!isEditMode" class="form-group full-width">
-            <label>Notes</label>
-            <textarea v-model="game.notes" rows="3"></textarea>
-          </div>
-
           <div class="form-group full-width">
-            <label class="flex items-center gap-2 wishlist-toggle">
+            <label class="wishlist-toggle">
               <input v-model="game.is_wishlist" type="checkbox" />
               Add to Wishlist
             </label>
           </div>
 
-          <div v-if="game.is_wishlist" class="form-group">
-            <label>Max Wishlist Price (€)</label>
-            <input v-model.number="game.wishlist_max_price" type="number" step="0.01" />
-          </div>
+          <template v-if="game.is_wishlist">
+            <div class="form-group">
+              <label>Condition I'm looking for</label>
+              <select v-model="game.condition">
+                <option value="">—</option>
+                <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Completeness I'm looking for</label>
+              <select v-model="game.completeness">
+                <option value="">—</option>
+                <option>Loose</option><option>Item &amp; Box</option><option>Item &amp; Manual</option>
+                <option>Complete</option><option>New</option>
+                <option>Graded CIB</option><option>Graded New</option>
+                <option>Box Only</option><option>Manual Only</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Max Price I'd pay (€)</label>
+              <input v-model.number="game.wishlist_max_price" type="number" step="0.01" />
+            </div>
+          </template>
+
         </div>
 
         <div v-if="duplicateWarning" class="duplicate-warning mt-3">
@@ -289,11 +256,51 @@
         </div>
       </form>
 
-      <!-- ADDITIONAL COPIES — add mode only -->
-      <div v-if="!isEditMode" class="copies-section mt-3">
-        <h3 class="copies-title">Additional Copies</h3>
-        <p class="copies-subtitle">Copy 1 is defined by the fields above. Add more copies here if you own multiple.</p>
+      <!-- ADD COPIES — add mode only, hidden when adding to wishlist -->
+      <div v-if="!isEditMode && !game.is_wishlist" class="copies-section mt-3">
+        <h3 class="copies-title">Add Copies</h3>
         <div class="copies-row">
+          <!-- Copy 1 always shown inline -->
+          <div class="copy-card copy-card-new copy-card-first">
+            <div class="copy-card-title">Copy 1</div>
+            <div class="copy-form-fields">
+              <div class="copy-form-row">
+                <label>Condition</label>
+                <select v-model="game.condition">
+                  <option value="">—</option>
+                  <option>Mint</option><option>Good</option><option>Fair</option><option>Poor</option>
+                </select>
+              </div>
+              <div class="copy-form-row">
+                <label>Completeness</label>
+                <select v-model="game.completeness">
+                  <option value="">—</option>
+                  <option>Loose</option><option>Item &amp; Box</option><option>Item &amp; Manual</option>
+                  <option>Complete</option><option>New</option>
+                  <option>Graded CIB</option><option>Graded New</option>
+                  <option>Box Only</option><option>Manual Only</option>
+                </select>
+              </div>
+              <div class="copy-form-row">
+                <label>Purchase Price (€)</label>
+                <input v-model.number="game.purchase_price" type="number" step="0.01" />
+              </div>
+              <div class="copy-form-row">
+                <label>Purchase Date</label>
+                <input v-model="game.purchase_date" type="date" />
+              </div>
+              <div class="copy-form-row">
+                <label>Location</label>
+                <input v-model="game.location" placeholder="Shelf A…" />
+              </div>
+              <div class="copy-form-row">
+                <label>Notes</label>
+                <textarea v-model="game.notes" rows="2"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Extra copies -->
           <div v-for="(copy, idx) in extraCopies" :key="idx" class="copy-card">
             <div class="copy-card-header">
               <span class="copy-card-num">Copy {{ idx + 2 }}</span>
@@ -327,7 +334,7 @@
           </div>
 
           <div v-if="addingExtraCopy" class="copy-card copy-card-new">
-            <div class="copy-card-title">New Copy</div>
+            <div class="copy-card-title">Copy {{ extraCopies.length + 2 }}</div>
             <div class="copy-form-fields">
               <div class="copy-form-row">
                 <label>Condition</label>
@@ -340,12 +347,14 @@
                 <label>Completeness</label>
                 <select v-model="extraCopyForm.completeness">
                   <option value="">—</option>
-                  <option>New/Sealed</option><option>CIB (Complete In Box)</option>
-                  <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                  <option>Loose</option><option>Item &amp; Box</option><option>Item &amp; Manual</option>
+                  <option>Complete</option><option>New</option>
+                  <option>Graded CIB</option><option>Graded New</option>
+                  <option>Box Only</option><option>Manual Only</option>
                 </select>
               </div>
               <div class="copy-form-row">
-                <label>Price (€)</label>
+                <label>Purchase Price (€)</label>
                 <input v-model.number="extraCopyForm.purchase_price" type="number" step="0.01" />
               </div>
               <div class="copy-form-row">
@@ -393,8 +402,10 @@
                   <label>Completeness</label>
                   <select v-model="copyForm.completeness">
                     <option value="">—</option>
-                    <option>New/Sealed</option><option>CIB (Complete In Box)</option>
-                    <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                    <option>Loose</option><option>Item &amp; Box</option><option>Item &amp; Manual</option>
+                    <option>Complete</option><option>New</option>
+                    <option>Graded CIB</option><option>Graded New</option>
+                    <option>Box Only</option><option>Manual Only</option>
                   </select>
                 </div>
                 <div class="copy-form-row">
@@ -1615,7 +1626,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
-  flex-wrap: wrap;
+  cursor: pointer;
 }
 
 .duplicate-actions,
@@ -1798,6 +1809,10 @@ onUnmounted(() => {
 .copy-card-new {
   border-style: solid;
   border-color: var(--primary, #6366f1);
+}
+
+.copy-card-first {
+  border-color: var(--glass-border);
 }
 
 .copies-subtitle {

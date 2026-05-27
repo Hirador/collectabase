@@ -20,7 +20,8 @@ async def list_games(
     with get_db() as db:
         query = """
             SELECT g.*, p.name as platform_name,
-              (SELECT COUNT(*) FROM game_copies gc WHERE gc.game_id = g.id) as copies_count
+              (SELECT COUNT(*) FROM game_copies gc WHERE gc.game_id = g.id) as copies_count,
+              (SELECT SUM(gc.current_value) FROM game_copies gc WHERE gc.game_id = g.id AND gc.current_value IS NOT NULL) as copies_total_value
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
             WHERE 1=1
@@ -107,8 +108,8 @@ async def create_game(game: GameCreate, force: bool = False):
         game_id = cursor.lastrowid
         db.execute(
             """INSERT INTO game_copies
-                   (game_id, condition, completeness, purchase_price, purchase_date, location, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (game_id, condition, completeness, purchase_price, purchase_date, location, current_value, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 game_id,
                 game.condition,
@@ -116,6 +117,7 @@ async def create_game(game: GameCreate, force: bool = False):
                 game.purchase_price,
                 game.purchase_date,
                 game.location,
+                game.current_value,
                 game.notes,
             ),
         )
@@ -376,8 +378,8 @@ async def add_copy(game_id: int, copy: CopyCreate):
             raise not_found("Game not found")
         cursor = db.execute(
             """INSERT INTO game_copies
-                   (game_id, condition, completeness, purchase_price, purchase_date, location, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (game_id, condition, completeness, purchase_price, purchase_date, location, current_value, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 game_id,
                 copy.condition,
@@ -385,6 +387,7 @@ async def add_copy(game_id: int, copy: CopyCreate):
                 copy.purchase_price,
                 copy.purchase_date,
                 copy.location,
+                copy.current_value,
                 copy.notes,
             ),
         )
@@ -398,6 +401,7 @@ async def add_copy(game_id: int, copy: CopyCreate):
             "purchase_price": copy.purchase_price,
             "purchase_date": copy.purchase_date,
             "location": copy.location,
+            "current_value": copy.current_value,
             "notes": copy.notes,
         }
 
@@ -417,17 +421,19 @@ async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
             "purchase_price": copy.purchase_price if copy.purchase_price is not None else existing_data["purchase_price"],
             "purchase_date": copy.purchase_date if copy.purchase_date is not None else existing_data["purchase_date"],
             "location": copy.location if copy.location is not None else existing_data["location"],
+            "current_value": copy.current_value if copy.current_value is not None else existing_data.get("current_value"),
             "notes": copy.notes if copy.notes is not None else existing_data["notes"],
         }
         db.execute(
             """UPDATE game_copies SET
                    condition = ?, completeness = ?,
-                   purchase_price = ?, purchase_date = ?, location = ?, notes = ?,
+                   purchase_price = ?, purchase_date = ?, location = ?, current_value = ?, notes = ?,
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = ?""",
             (
                 merged["condition"], merged["completeness"],
-                merged["purchase_price"], merged["purchase_date"], merged["location"], merged["notes"],
+                merged["purchase_price"], merged["purchase_date"], merged["location"],
+                merged["current_value"], merged["notes"],
                 copy_id,
             ),
         )
@@ -440,6 +446,7 @@ async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
             "purchase_price": merged["purchase_price"],
             "purchase_date": merged["purchase_date"],
             "location": merged["location"],
+            "current_value": merged["current_value"],
             "notes": merged["notes"],
         }
 

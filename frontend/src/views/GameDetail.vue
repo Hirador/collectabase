@@ -21,9 +21,6 @@
             title="Remove cover"
           >✕</button>
         </div>
-        <div v-if="game.current_value" class="value-badge">
-          €{{ game.current_value }}
-        </div>
         <div class="cover-upload-row">
           <input
             ref="coverFileInput"
@@ -194,8 +191,10 @@
                     <label>Completeness</label>
                     <select v-model="copyForm.completeness">
                       <option value="">—</option>
-                      <option>New/Sealed</option><option>CIB (Complete In Box)</option>
-                      <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                      <option>Loose</option><option>Item &amp; Box</option><option>Item &amp; Manual</option>
+                      <option>Complete</option><option>New</option>
+                      <option>Graded CIB</option><option>Graded New</option>
+                      <option>Box Only</option><option>Manual Only</option>
                     </select>
                   </div>
                   <div class="copy-form-row">
@@ -253,12 +252,16 @@
                     <span class="copy-field-label">Location</span>
                     <span>{{ copy.location }}</span>
                   </div>
-                  <div v-if="game.current_value && copy.purchase_price" class="copy-field copy-pl-row">
+                  <div v-if="copyValue(copy) != null && copy.purchase_price" class="copy-field copy-pl-row">
                     <span class="copy-field-label">P/L</span>
-                    <span class="pl-pill" :class="game.current_value >= copy.purchase_price ? 'profit' : 'loss'">
-                      {{ game.current_value >= copy.purchase_price ? '↑' : '↓' }}
-                      €{{ Math.abs(game.current_value - copy.purchase_price).toFixed(2) }}
+                    <span class="pl-pill" :class="copyValue(copy) >= copy.purchase_price ? 'profit' : 'loss'">
+                      {{ copyValue(copy) >= copy.purchase_price ? '↑' : '↓' }}
+                      €{{ Math.abs(copyValue(copy) - copy.purchase_price).toFixed(2) }}
                     </span>
+                  </div>
+                  <div v-if="copy.current_value != null" class="copy-field">
+                    <span class="copy-field-label">Baseline</span>
+                    <span class="copy-baseline-val">€{{ formatMoney(copy.current_value) }}</span>
                   </div>
                 </div>
                 <div v-if="copy.notes" class="copy-card-notes">{{ copy.notes }}</div>
@@ -280,8 +283,10 @@
                   <label>Completeness</label>
                   <select v-model="copyForm.completeness">
                     <option value="">—</option>
-                    <option>New/Sealed</option><option>CIB (Complete In Box)</option>
-                    <option>Box + Game</option><option>Game + Manual</option><option>Loose</option>
+                    <option>Loose</option><option>Item &amp; Box</option><option>Item &amp; Manual</option>
+                    <option>Complete</option><option>New</option>
+                    <option>Graded CIB</option><option>Graded New</option>
+                    <option>Box Only</option><option>Manual Only</option>
                   </select>
                 </div>
                 <div class="copy-form-row">
@@ -335,18 +340,14 @@
           </div>
 
           <div v-if="latestPrice" class="price-cells">
-            <div class="price-cell" :class="{ relevant: relevantKey() === 'loose' }">
-              <span class="p-label">Loose</span>
-              <span class="p-val">{{ latestPrice.loose_price != null ? '€' + latestPrice.loose_price.toFixed(2) : '—' }}</span>
-            </div>
-            <div class="price-cell" :class="{ relevant: relevantKey() === 'complete' }">
-              <span class="p-label">CIB</span>
-              <span class="p-val">{{ latestPrice.complete_price != null ? '€' + latestPrice.complete_price.toFixed(2) : '—' }}</span>
-            </div>
-            <div class="price-cell" :class="{ relevant: relevantKey() === 'new' }">
-              <span class="p-label">New</span>
-              <span class="p-val">{{ latestPrice.new_price != null ? '€' + latestPrice.new_price.toFixed(2) : '—' }}</span>
-            </div>
+            <template v-for="pc in priceColumns" :key="pc.key">
+              <div v-if="latestPrice[pc.field] != null"
+                   class="price-cell"
+                   :class="{ relevant: relevantKey() === pc.key }">
+                <span class="p-label">{{ pc.label }}</span>
+                <span class="p-val">€{{ latestPrice[pc.field].toFixed(2) }}</span>
+              </div>
+            </template>
           </div>
           <div v-if="latestPrice" class="price-meta mt-2">
             Last checked: {{ formatDate(latestPrice.fetched_at) }}
@@ -361,31 +362,61 @@
           </div>
 
           <div class="start-value-row mt-3 pt-2">
-            <span class="text-muted">
-              Start value:
-              <strong>{{ startValue != null ? '€' + formatMoney(startValue) : '—' }}</strong>
-            </span>
-            <button class="btn btn-secondary btn-sm" @click="editStartValue">Update Base Line</button>
+            <button class="btn btn-secondary btn-sm" @click="toggleBaselinePanel">
+              {{ baselineOpen ? 'Close' : 'Update Base Line' }}
+            </button>
           </div>
 
-          <div v-if="marketSuggestion" class="market-suggestion mt-2">
-            <div v-if="marketSuggestion.source === 'pricecharting'" class="market-suggestion-text">
-              📊 €{{ formatMoney(marketSuggestion.market_price) }} (PriceCharting - Loose)
-              <div v-if="marketSuggestion.matched_title" class="market-match">
-                Match: {{ marketSuggestion.matched_title }}
-                <span v-if="marketSuggestion.matched_platform"> ({{ marketSuggestion.matched_platform }})</span>
-                <span v-if="marketSuggestion.match_score != null"> · confidence {{ formatMatchScore(marketSuggestion.match_score) }}</span>
+          <!-- Inline baseline editor -->
+          <div v-if="baselineOpen" class="baseline-panel mt-2">
+            <!-- Price update message -->
+            <div v-if="priceUpdateMessage" class="baseline-update-msg mb-2">
+              <template v-if="priceUpdateMessage.type === 'updated'">
+                <div class="text-sm font-semibold mb-1">Values updated:</div>
+                <div v-for="line in priceUpdateMessage.lines" :key="line" class="text-sm text-muted">{{ line }}</div>
+              </template>
+              <div v-else class="text-sm text-muted">No price update.</div>
+            </div>
+            <!-- Per-copy values -->
+            <div class="baseline-section" v-if="copies.length">
+              <div class="baseline-section-title">Per-Copy Baseline</div>
+              <div class="baseline-section-desc text-muted">Set the current market value for each copy. Used for P/L calculation.</div>
+              <div class="baseline-copies-list mt-2">
+                <div v-for="(copy, idx) in copies" :key="copy.id" class="baseline-copy-row">
+                  <div class="baseline-copy-info">
+                    <span class="baseline-copy-num">Copy {{ idx + 1 }}</span>
+                    <span v-if="copy.condition" class="badge ml-1">{{ copy.condition }}</span>
+                    <span v-if="copy.completeness" class="badge ml-1">{{ copy.completeness }}</span>
+                  </div>
+                  <div class="baseline-copy-controls">
+                    <input
+                      v-model.number="baselineCopyInputs[copy.id]"
+                      type="number" step="0.01" placeholder="€"
+                      class="search-input baseline-copy-input"
+                    />
+                    <select
+                      v-if="latestPrice"
+                      @change="applyCompletenessPrice($event, 'copy', copy.id)"
+                      class="search-input baseline-pick-select"
+                    >
+                      <option value="">{{ copy.completeness ? copy.completeness + ' — use…' : 'Use price for…' }}</option>
+                      <option
+                        v-for="opt in completenessSelectOptions"
+                        :key="opt.label"
+                        :value="opt.label"
+                        :disabled="opt.price == null"
+                      >{{ opt.label }}{{ opt.price != null ? ' — €' + opt.price.toFixed(2) : ' (N/A)' }}</option>
+                    </select>
+                    <button type="button" class="btn btn-danger btn-sm" title="Clear" @click="baselineCopyInputs[copy.id] = null">✕</button>
+                  </div>
+                </div>
               </div>
             </div>
-            <div v-else-if="marketSuggestion.source === 'ebay'" class="market-suggestion-text">
-              🛒 ~€{{ formatMoney(marketSuggestion.market_price) }}
-              (Median of {{ marketSuggestion.sample_size }} eBay listings, €{{ formatMoney(marketSuggestion.price_min) }}-€{{ formatMoney(marketSuggestion.price_max) }})
-            </div>
-            <div class="market-suggestion-actions mt-2">
-              <button class="btn btn-primary btn-sm" @click="setMarketSuggestionAsCurrentValue" :disabled="settingSuggestedValue">
-                {{ settingSuggestedValue ? 'Saving...' : 'Set as current value' }}
+            <div class="flex gap-2 mt-2 justify-end">
+              <button type="button" class="btn btn-secondary btn-sm" @click="toggleBaselinePanel">Cancel</button>
+              <button type="button" class="btn btn-primary btn-sm" @click="saveBaseline" :disabled="baselineSaving">
+                {{ baselineSaving ? 'Saving...' : 'Save' }}
               </button>
-              <button class="btn btn-secondary btn-sm" @click="dismissMarketSuggestion">Dismiss</button>
             </div>
           </div>
 
@@ -534,9 +565,8 @@ const enriching = ref(false)
 const priceLoading = ref(false)
 const priceHistory = ref([])
 const priceError = ref('')
-const marketSuggestion = ref(null)
+const priceUpdateMessage = ref(null)
 const rawgReference = ref(null)
-const settingSuggestedValue = ref(false)
 const priceChartEl = ref(null)
 const coverFileInput = ref(null)
 const galleryFileInput = ref(null)
@@ -556,7 +586,6 @@ const imagesLoading = ref(false)
 const manualEntry = ref({ loose_price: null, complete_price: null, new_price: null })
 const manualSaving = ref(false)
 const deletingEntryId = ref(null)
-const startValue = ref(null)
 const coverHasError = ref(false)
 const coverAutoFixing = ref(false)
 const coverAutoEnrichTried = ref(false)
@@ -568,6 +597,9 @@ const copyForm = ref({
   condition: '', completeness: '',
   purchase_price: null, purchase_date: '', location: '', notes: ''
 })
+const baselineOpen = ref(false)
+const baselineCopyInputs = ref({})
+const baselineSaving = ref(false)
 let chartInstance = null
 
 const latestPrice = computed(() => priceHistory.value[0] ?? null)
@@ -676,17 +708,6 @@ function buildChart() {
       spanGaps: true
     }
   ]
-  if (startValue.value != null && Number.isFinite(Number(startValue.value))) {
-    datasets.push({
-      label: 'Start Value',
-      data: labels.map(() => Number(startValue.value)),
-      borderColor: '#facc15',
-      backgroundColor: 'transparent',
-      borderDash: [6, 4],
-      tension: 0,
-      pointRadius: 0
-    })
-  }
 
   chartInstance = new Chart(priceChartEl.value, {
     type: 'line',
@@ -739,11 +760,116 @@ watch(
   { deep: true }
 )
 
+// The 6 real PriceCharting condition tiers (verified from pricecharting.com HTML)
+const priceColumns = [
+  { key: 'loose',        label: 'Loose',        field: 'loose_price' },
+  { key: 'complete',     label: 'Complete',     field: 'complete_price' },
+  { key: 'new',          label: 'New',          field: 'new_price' },
+  { key: 'graded',       label: 'Graded',       field: 'graded_price' },
+  { key: 'box_only',     label: 'Box Only',     field: 'box_only_price' },
+  { key: 'manual_only',  label: 'Manual Only',  field: 'manual_only_price' },
+]
+
+// completeness value → PC price key
+// "Item & Box" and "Item & Manual" are collector labels; nearest PC tier is complete_price
+const COMPLETENESS_TO_PC = {
+  'Loose':         'loose',
+  'Item & Box':    'complete',
+  'Item & Manual': 'complete',
+  'Complete':      'complete',
+  'New':           'new',
+  'Graded CIB':    'graded',
+  'Graded New':    'graded',
+  'Box Only':      'box_only',
+  'Manual Only':   'manual_only',
+}
+
+const suggestableColumns = priceColumns
+
+// All 9 collector completeness labels mapped to their PC price, for the baseline selector
+const completenessSelectOptions = computed(() => [
+  { label: 'Loose',         pcKey: 'loose' },
+  { label: 'Item & Box',    pcKey: 'complete' },
+  { label: 'Item & Manual', pcKey: 'complete' },
+  { label: 'Complete',      pcKey: 'complete' },
+  { label: 'New',           pcKey: 'new' },
+  { label: 'Graded CIB',    pcKey: 'graded' },
+  { label: 'Graded New',    pcKey: 'graded' },
+  { label: 'Box Only',      pcKey: 'box_only' },
+  { label: 'Manual Only',   pcKey: 'manual_only' },
+].map(opt => {
+  const col = priceColumns.find(c => c.key === opt.pcKey)
+  const price = (latestPrice.value && col) ? latestPrice.value[col.field] : null
+  return { ...opt, price }
+}))
+
+function applyCompletenessPrice(event, _target, copyId) {
+  const label = event.target.value
+  event.target.value = ''
+  if (!label) return
+  const opt = completenessSelectOptions.value.find(o => o.label === label)
+  if (!opt || opt.price == null) return
+  baselineCopyInputs.value[copyId] = opt.price
+}
+
 function relevantKey() {
-  const c = (copies.value[0]?.completeness || game.value?.completeness || '').toLowerCase()
-  if (c.includes('new') || c.includes('sealed')) return 'new'
-  if (c.includes('cib') || c.includes('complete') || c.includes('box')) return 'complete'
-  return 'loose'
+  const comp = copies.value[0]?.completeness || game.value?.completeness || ''
+  return COMPLETENESS_TO_PC[comp] || 'loose'
+}
+
+function copyValue(copy) {
+  return copy.current_value ?? null
+}
+
+function conditionSuggestions(copy) {
+  const bestKey = COMPLETENESS_TO_PC[copy.completeness] || 'loose'
+  return [
+    priceColumns.find(c => c.key === bestKey),
+    ...priceColumns.filter(c => c.key !== bestKey)
+  ].filter(Boolean)
+}
+
+function toggleBaselinePanel() {
+  if (!baselineOpen.value) {
+    const inputs = {}
+    for (const copy of copies.value) {
+      inputs[copy.id] = copy.current_value ?? null
+    }
+    baselineCopyInputs.value = inputs
+  }
+  baselineOpen.value = !baselineOpen.value
+}
+
+async function saveBaseline() {
+  if (!game.value) return
+  baselineSaving.value = true
+  try {
+    for (const copy of copies.value) {
+      const raw = baselineCopyInputs.value[copy.id]
+      const val = raw != null && raw !== '' ? Number(raw) : null
+      if (val !== copy.current_value) {
+        const res = await gamesApi.setCopyValue(route.params.id, copy.id, val)
+        if (!res.ok) {
+          const detail = res.data?.detail
+          notifyError(detail?.message || detail || `Failed to update Copy ${copy.id} baseline.`)
+        }
+      }
+    }
+
+    notifySuccess('Base line updated.')
+    priceUpdateMessage.value = null
+    baselineOpen.value = false
+    await loadGame()
+    if (priceHistory.value.length >= 2) {
+      await nextTick()
+      buildChart()
+    }
+  } catch (e) {
+    console.error('Failed saving baseline:', e)
+    notifyError('Failed to save base line.')
+  } finally {
+    baselineSaving.value = false
+  }
 }
 
 function ebayUrl() {
@@ -804,7 +930,7 @@ function entryDisplayValue(entry) {
 async function checkPrice() {
   priceLoading.value = true
   priceError.value = ''
-  marketSuggestion.value = null
+  priceUpdateMessage.value = null
   rawgReference.value = null
   try {
     const res = await priceApi.check(route.params.id)
@@ -822,10 +948,25 @@ async function checkPrice() {
         priceError.value = data.error
       }
     } else {
-      marketSuggestion.value = data
+      await loadGame()
       await loadPriceHistory()
+      const inputs = {}
+      for (const copy of copies.value) {
+        inputs[copy.id] = copy.current_value ?? null
+      }
+      baselineCopyInputs.value = inputs
+      const updatedCopies = data.copies_updated || []
+      if (updatedCopies.length > 0) {
+        priceUpdateMessage.value = {
+          type: 'updated',
+          lines: updatedCopies.map(c => `Copy ${c.copy_id} (${c.completeness}): €${c.current_value}`)
+        }
+      } else {
+        priceUpdateMessage.value = { type: 'no_update' }
+      }
+      baselineOpen.value = true
     }
-} catch (e) {
+  } catch (e) {
     priceError.value = 'Price check failed'
     console.error(e)
     notifyError('Price check failed.')
@@ -837,7 +978,7 @@ async function checkPrice() {
 async function checkPriceEbay() {
   priceLoading.value = true
   priceError.value = ''
-  marketSuggestion.value = null
+  priceUpdateMessage.value = null
   rawgReference.value = null
   try {
     const res = await priceApi.check(route.params.id, 'ebay')
@@ -850,8 +991,23 @@ async function checkPriceEbay() {
     if (data.error) {
       priceError.value = data.error
     } else {
-      marketSuggestion.value = data
+      await loadGame()
       await loadPriceHistory()
+      const inputs = {}
+      for (const copy of copies.value) {
+        inputs[copy.id] = copy.current_value ?? null
+      }
+      baselineCopyInputs.value = inputs
+      const updatedCopies = data.copies_updated || []
+      if (updatedCopies.length > 0) {
+        priceUpdateMessage.value = {
+          type: 'updated',
+          lines: updatedCopies.map(c => `Copy ${c.copy_id} (${c.completeness}): €${c.current_value}`)
+        }
+      } else {
+        priceUpdateMessage.value = { type: 'no_update' }
+      }
+      baselineOpen.value = true
     }
   } catch (e) {
     priceError.value = 'eBay price check failed'
@@ -862,85 +1018,11 @@ async function checkPriceEbay() {
   }
 }
 
-async function setMarketSuggestionAsCurrentValue() {
-  if (!marketSuggestion.value || !game.value) return
-  const marketPrice = Number(marketSuggestion.value.market_price)
-  if (!Number.isFinite(marketPrice)) return
-
-  settingSuggestedValue.value = true
-  try {
-    const res = await gamesApi.update(route.params.id, { ...game.value, current_value: marketPrice })
-    if (res.ok) {
-      game.value.current_value = marketPrice
-      startValue.value = marketPrice
-      marketSuggestion.value = null
-      notifySuccess('Current value updated.')
-    } else {
-      const detail = res.data?.detail
-      notifyError(detail?.message || detail || 'Failed to set current value.')
-    }
-  } catch (e) {
-    console.error('Failed setting current value:', e)
-    notifyError('Failed to set current value.')
-  } finally {
-    settingSuggestedValue.value = false
-  }
-}
-
-function dismissMarketSuggestion() {
-  marketSuggestion.value = null
-}
-
-async function editStartValue() {
-  if (!game.value) return
-  const current = startValue.value != null ? String(startValue.value) : ''
-  const raw = window.prompt('Enter start value (EUR)', current)
-  if (raw == null) return
-
-  const parsed = Number(raw.replace(',', '.'))
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    notifyError('Please enter a valid number.')
-    return
-  }
-
-  try {
-    const res = await gamesApi.update(route.params.id, { ...game.value, current_value: parsed })
-    if (!res.ok) {
-      const detail = res.data?.detail
-      notifyError(detail?.message || detail || 'Failed to update start value.')
-      return
-    }
-    game.value.current_value = parsed
-    startValue.value = parsed
-    notifySuccess('Start value updated.')
-    if (priceHistory.value.length >= 2) {
-      await nextTick()
-      buildChart()
-    }
-  } catch (e) {
-    console.error('Failed updating start value:', e)
-    notifyError('Failed to update start value.')
-  }
-}
-
 async function loadPriceHistory() {
   try {
     const res = await priceApi.history(route.params.id)
     if (res.ok) {
-      const history = res.data || []
-      // Prepend the initial purchase price (startValue) as the oldest record
-      // so the chart has a baseline instantly.
-      if (startValue.value != null && Number.isFinite(Number(startValue.value))) {
-        history.push({
-          id: 'base-price',
-          source: 'Start Value',
-          loose_price: Number(startValue.value),
-          complete_price: Number(startValue.value),
-          new_price: Number(startValue.value),
-          fetched_at: game.value?.purchase_date || game.value?.created_at || new Date(0).toISOString()
-        })
-      }
-      priceHistory.value = history
+      priceHistory.value = res.data || []
     }
   } catch (e) {
     console.error('Failed to load price history:', e)
@@ -1055,10 +1137,6 @@ async function loadGame() {
       copies.value = res.data.copies || []
       coverAutoEnrichTried.value = false
       coverHasError.value = false
-      if (startValue.value == null) {
-        const v = Number(game.value.current_value)
-        startValue.value = Number.isFinite(v) ? v : null
-      }
       await ensureNonGameCover()
       await loadItemImages()
     }
@@ -2447,5 +2525,116 @@ onMounted(async () => {
   .price-history-row .btn {
     width: 100%;
   }
+}
+
+/* Baseline inline panel */
+.baseline-panel {
+  border: 1px solid var(--glass-border);
+  border-radius: 0.6rem;
+  padding: 1rem;
+  background: rgba(0,0,0,0.18);
+}
+
+.baseline-section {
+  border: 1px solid var(--glass-border);
+  border-radius: 0.6rem;
+  padding: 1rem;
+}
+
+.baseline-section-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.baseline-section-desc {
+  font-size: 0.75rem;
+}
+
+.baseline-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.baseline-ref-input {
+  width: 110px;
+}
+
+.baseline-suggest-btns {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.baseline-suggest-btn {
+  font-size: 0.68rem !important;
+  padding: 0.2rem 0.45rem !important;
+  min-height: 26px !important;
+}
+
+.baseline-copies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.baseline-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  background: rgba(0,0,0,0.18);
+  border-radius: 0.45rem;
+  border: 1px solid var(--glass-border);
+}
+
+.baseline-copy-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 120px;
+}
+
+.baseline-copy-num {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.baseline-copy-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.baseline-copy-input {
+  width: 100px;
+}
+
+.baseline-pick-select {
+  flex: 1;
+  min-width: 160px;
+  max-width: 260px;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.5rem;
+  height: auto;
+}
+
+.copy-baseline-val {
+  font-size: 0.82rem;
+  color: #60a5fa;
+}
+
+.justify-end {
+  justify-content: flex-end;
 }
 </style>

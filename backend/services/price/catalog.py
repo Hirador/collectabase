@@ -68,7 +68,6 @@ def _lookup_local_catalog_price(title: str, platform_name: str):
         row_clean = _clean_catalog_title(row_norm_title, row_platform or norm_platform)
 
         score = max(
-            _catalog_match_score(norm_title, row_norm_title),
             _catalog_match_score(query_clean, row_norm_title),
             _catalog_match_score(query_clean, row_clean),
         )
@@ -85,6 +84,26 @@ def _lookup_local_catalog_price(title: str, platform_name: str):
             best = item
 
     if not best or best_score < 0.55: return None
+
+    # If query title has edition-distinguishing words (Collector's, Limited, Deluxe…)
+    # but the best match's original title doesn't share any of those words,
+    # the catalog matched the wrong product — let the live scraper find the right one.
+    _EDITION_TOKENS = {
+        "collector", "collectors", "limited", "deluxe", "ultimate", "special",
+        "gold", "platinum", "anniversary", "definitive", "premium", "enhanced",
+        "remastered", "directors", "goty",
+    }
+    query_edition = _EDITION_TOKENS & set(norm_title.split())
+    if query_edition:
+        best_norm = _normalize_text(best.get("title", ""))
+        best_edition = _EDITION_TOKENS & set(best_norm.split())
+        if not (query_edition & best_edition):
+            logger.debug(
+                f"Edition mismatch: query has {query_edition} but best match "
+                f"'{best.get('title')}' has none — skipping catalog, deferring to live scrape"
+            )
+            return None
+
     loose_eur = best.get("loose_eur")
     if loose_eur is None: return None
 

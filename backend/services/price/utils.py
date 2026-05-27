@@ -42,6 +42,18 @@ PLATFORM_SLUGS = {
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Collectabase/1.0)"}
 
+COMPLETENESS_TO_PC = {
+    'Loose':         'loose',
+    'Item & Box':    'complete',
+    'Item & Manual': 'complete',
+    'Complete':      'complete',
+    'New':           'new',
+    'Graded CIB':    'graded',
+    'Graded New':    'graded',
+    'Box Only':      'box_only',
+    'Manual Only':   'manual_only',
+}
+
 def _env_any(*names: str) -> Optional[str]:
     env = os.environ
     for name in names:
@@ -127,10 +139,16 @@ def _normalize_text(value: Optional[str]) -> str:
 
 _TITLE_NOISE_TOKENS = {
     "console", "bundle", "edition", "model", "system", "with", "and", "the", "for", "new", "used",
+    # Common game-edition suffixes that appear across many unrelated titles
+    "collector", "collectors", "deluxe", "ultimate", "special", "limited", "premium",
+    # Apostrophe artifact: "Collector's" → "collector s" after normalize; strip the lone "s"
+    "s",
 }
 
 def _clean_catalog_title(value: Optional[str], platform_name: Optional[str] = None) -> str:
-    tokens = _normalize_text(value).split()
+    # Strip apostrophes before normalizing so "Collector's" → "collectors" not "collector s"
+    cleaned_input = re.sub(r"'s\b|'s\b", "s", str(value or ""))
+    tokens = _normalize_text(cleaned_input).split()
     platform_tokens = set(_normalize_text(platform_name).split())
     cleaned = []
     for token in tokens:
@@ -154,5 +172,11 @@ def _catalog_match_score(query_title: str, row_title: str) -> float:
     r_tokens = set(row_title.split())
     overlap = len(q_tokens & r_tokens) / max(len(q_tokens), 1)
     seq = SequenceMatcher(None, query_title, row_title).ratio()
-    contains_bonus = 0.85 if (query_title in row_title or row_title in query_title) else 0.0
+    # Use whole-word token subset matching (requires ≥2 tokens) to avoid
+    # single-character titles like "D" matching as a substring of any word.
+    contains_bonus = 0.0
+    if len(r_tokens) >= 2 and r_tokens.issubset(q_tokens):
+        contains_bonus = 0.85
+    elif len(q_tokens) >= 2 and q_tokens.issubset(r_tokens):
+        contains_bonus = 0.85
     return max(seq, overlap * 0.9, contains_bonus)

@@ -180,16 +180,30 @@
     <!-- Quick-Add Modal -->
     <div v-if="addModal.open" class="modal-backdrop" @click.self="closeAddModal">
       <div class="modal">
-        <h2>Add to Collection</h2>
         <p class="modal-game-title">{{ addModal.item?.title }}</p>
         <p class="text-muted">{{ addModal.item?.platform }}</p>
 
+        <!-- Mode toggle -->
+        <div class="add-mode-toggle">
+          <button
+            type="button"
+            class="add-mode-btn"
+            :class="{ active: addModal.mode === 'collection' }"
+            @click="addModal.mode = 'collection'"
+          >📚 My Collection</button>
+          <button
+            type="button"
+            class="add-mode-btn"
+            :class="{ active: addModal.mode === 'wishlist' }"
+            @click="addModal.mode = 'wishlist'"
+          >⭐ Wishlist</button>
+        </div>
+
         <div class="form-group">
-          <label>Condition</label>
+          <label>{{ addModal.mode === 'wishlist' ? "Condition I'm looking for" : 'Condition' }}</label>
           <select v-model="addModal.condition" class="filter-select w-full">
             <option value="">– not set –</option>
             <option>Mint</option>
-            <option>Very Good</option>
             <option>Good</option>
             <option>Fair</option>
             <option>Poor</option>
@@ -197,30 +211,42 @@
         </div>
 
         <div class="form-group">
-          <label>Completeness</label>
+          <label>{{ addModal.mode === 'wishlist' ? "Completeness I'm looking for" : 'Completeness' }}</label>
           <select v-model="addModal.completeness" class="filter-select w-full">
             <option value="">– not set –</option>
+            <option>Loose</option>
+            <option>Item &amp; Box</option>
+            <option>Item &amp; Manual</option>
             <option>Complete</option>
-            <option>Game Only</option>
+            <option>New</option>
+            <option>Graded CIB</option>
+            <option>Graded New</option>
             <option>Box Only</option>
             <option>Manual Only</option>
           </select>
         </div>
 
         <div class="form-group">
-          <label>Purchase Price (€)</label>
+          <label>{{ addModal.mode === 'wishlist' ? "Max Price I'd pay (€)" : 'Purchase Price (€)' }}</label>
           <input v-model="addModal.purchasePrice" type="number" step="0.01" min="0" class="search-input w-full" placeholder="0.00" />
+        </div>
+
+        <div v-if="addModal.mode === 'collection'" class="form-group">
+          <label>Purchase Date</label>
+          <input v-model="addModal.purchaseDate" type="date" class="search-input w-full" />
         </div>
 
         <div class="modal-actions">
           <button class="btn btn-secondary" @click="closeAddModal">Cancel</button>
           <button class="btn btn-primary" :disabled="addModal.saving" @click="confirmAdd">
-            {{ addModal.saving ? 'Adding…' : 'Add to Collection' }}
+            {{ addModal.saving ? 'Adding…' : (addModal.mode === 'wishlist' ? 'Add to Wishlist' : 'Add to Collection') }}
           </button>
         </div>
 
         <p v-if="addModal.error" class="error-text">{{ addModal.error }}</p>
-        <p v-if="addModal.success" class="success-text">✓ Added to your collection!</p>
+        <p v-if="addModal.success" class="success-text">
+          {{ addModal.mode === 'wishlist' ? '⭐ Added to wishlist!' : '✓ Added to collection!' }}
+        </p>
       </div>
     </div>
   </div>
@@ -462,9 +488,11 @@ const backendPlatforms = ref([])
 const addModal = ref({
   open: false,
   item: null,
+  mode: 'collection',
   condition: '',
   completeness: '',
   purchasePrice: '',
+  purchaseDate: '',
   saving: false,
   error: '',
   success: false,
@@ -474,9 +502,11 @@ function openAddModal(item) {
   addModal.value = {
     open: true,
     item,
+    mode: 'collection',
     condition: '',
     completeness: '',
     purchasePrice: '',
+    purchaseDate: '',
     saving: false,
     error: '',
     success: false,
@@ -491,11 +521,9 @@ async function confirmAdd() {
   const item = addModal.value.item
   if (!item) return
 
-  // Find matching platform_id from backend platforms list
   const platformMatch = backendPlatforms.value.find(
     p => p.name.toLowerCase() === item.platform.toLowerCase()
   )
-
   if (!platformMatch) {
     addModal.value.error = `Platform "${item.platform}" not found in your platform list.`
     return
@@ -505,13 +533,19 @@ async function confirmAdd() {
   addModal.value.error = ''
   addModal.value.success = false
 
+  const isWishlist = addModal.value.mode === 'wishlist'
+  const price = addModal.value.purchasePrice ? parseFloat(addModal.value.purchasePrice) : null
+
   const payload = {
     title: item.title,
     platform_id: platformMatch.id,
+    is_wishlist: isWishlist,
     condition: addModal.value.condition || null,
     completeness: addModal.value.completeness || null,
-    purchase_price: addModal.value.purchasePrice ? parseFloat(addModal.value.purchasePrice) : null,
-    current_value: item.loose_eur ?? null,
+    ...(isWishlist
+      ? { wishlist_max_price: price }
+      : { purchase_price: price, purchase_date: addModal.value.purchaseDate || null }
+    ),
   }
 
   try {
@@ -520,7 +554,7 @@ async function confirmAdd() {
       addModal.value.success = true
       setTimeout(closeAddModal, 1200)
     } else {
-      addModal.value.error = res.data?.message || 'Failed to add game.'
+      addModal.value.error = res.data?.message || `Failed to add to ${isWishlist ? 'wishlist' : 'collection'}.`
     }
   } catch (e) {
     addModal.value.error = 'Network error.'
@@ -798,6 +832,30 @@ onMounted(async () => {
   font-weight: 600;
   font-size: 1rem;
   margin: 0 0 0.1rem;
+}
+
+.add-mode-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.add-mode-btn {
+  flex: 1;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.add-mode-btn.active {
+  background: var(--primary, #6366f1);
+  border-color: var(--primary, #6366f1);
+  color: #fff;
 }
 
 .form-group {

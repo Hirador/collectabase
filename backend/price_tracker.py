@@ -11,7 +11,7 @@ from .database import dict_from_row, get_db, set_app_meta
 from . import jobs
 
 from .services.price.utils import (
-    PLATFORM_SLUGS, _to_eur, get_eur_rate, _normalize_text
+    PLATFORM_SLUGS, COMPLETENESS_TO_PC, _to_eur, get_eur_rate, _normalize_text
 )
 from .services.price.catalog import (
     _lookup_local_catalog_price, scrape_platform_catalog,
@@ -26,6 +26,30 @@ from .services.price.providers.pricecharting import (
 router = APIRouter()
 
 logger = logging.getLogger("collectabase.price_tracker")
+
+
+def _apply_prices_to_copies(db, game_id: int, prices_eur: dict) -> list:
+    """Update each copy's current_value from PC tier prices based on completeness mapping."""
+    copies = db.execute(
+        "SELECT id, completeness FROM game_copies WHERE game_id = ?", (game_id,)
+    ).fetchall()
+    updated = []
+    for copy in copies:
+        completeness = (copy["completeness"] or "").strip()
+        pc_key = COMPLETENESS_TO_PC.get(completeness, "loose")
+        price = prices_eur.get(pc_key)
+        if price is not None:
+            db.execute(
+                "UPDATE game_copies SET current_value = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (price, copy["id"]),
+            )
+            updated.append({
+                "copy_id": copy["id"],
+                "completeness": completeness or "Loose",
+                "pc_tier": pc_key,
+                "current_value": price,
+            })
+    return updated
 
 def _get_game_for_price_lookup(game_id: int):
     with get_db() as db:
@@ -58,6 +82,7 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
             return {"error": "eBay is not configured in Settings."}
         ebay = await fetch_ebay_market_price(game["title"], game.get("platform_name") or "", item_type)
         if ebay:
+            prices_eur = {"loose": ebay["market_price"]}
             with get_db() as db:
                 db.execute(
                     """
@@ -67,6 +92,7 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
                     """,
                     (game_id, ebay["market_price"]),
                 )
+                copies_updated = _apply_prices_to_copies(db, game_id, prices_eur)
                 db.commit()
             return {
                 "market_price": ebay["market_price"],
@@ -74,6 +100,7 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
                 "sample_size": ebay["sample_size"],
                 "price_min": ebay["price_min"],
                 "price_max": ebay["price_max"],
+                "copies_updated": copies_updated,
             }
         return {"error": "No eBay listings found for this game."}
 
@@ -83,26 +110,37 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
             # Retry without platform constraint for mismatched/legacy platform labels.
             catalog = _lookup_local_catalog_price(game["title"], "")
         if catalog:
+            prices_eur = {
+                "loose": catalog["loose_eur"],
+                "complete": catalog["cib_eur"],
+                "new": catalog["new_eur"],
+                "graded": catalog.get("graded_eur"),
+                "box_only": catalog.get("box_only_eur"),
+                "manual_only": catalog.get("manual_only_eur"),
+            }
             with get_db() as db:
                 db.execute(
                     """
                     INSERT INTO price_history
-                        (game_id, source, loose_price, complete_price, new_price, eur_rate, pricecharting_id)
-                    VALUES (?, 'pricecharting', ?, ?, ?, 1.0, ?)
+                        (game_id, source, loose_price, complete_price, new_price,
+                         graded_price, box_only_price, manual_only_price,
+                         eur_rate, pricecharting_id)
+                    VALUES (?, 'pricecharting', ?, ?, ?, ?, ?, ?, 1.0, ?)
                     """,
                     (
                         game_id,
-                        catalog["loose_eur"],
-                        catalog["cib_eur"],
-                        catalog["new_eur"],
+                        prices_eur["loose"], prices_eur["complete"], prices_eur["new"],
+                        prices_eur["graded"], prices_eur["box_only"], prices_eur["manual_only"],
                         catalog["pricecharting_id"] or None,
                     ),
                 )
+                copies_updated = _apply_prices_to_copies(db, game_id, prices_eur)
                 db.commit()
             return {
-                "market_price": catalog["loose_eur"],
+                "market_price": prices_eur["loose"],
                 "source": "pricecharting",
-                "condition": "loose",
+                "prices": prices_eur,
+                "copies_updated": copies_updated,
                 "matched_title": catalog["product_name"],
                 "matched_platform": catalog["platform"],
                 "match_score": catalog["match_score"],
@@ -113,24 +151,41 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
         # Always try scraper first; token does not gate this path.
         pc = await _fetch_pricecharting_scrape(game["title"], game.get("platform_name") or "")
         if pc:
-            loose_eur = _to_eur(pc["loose_usd"], eur_rate)
-            cib_eur = _to_eur(pc["cib_usd"], eur_rate)
-            new_eur = _to_eur(pc["new_usd"], eur_rate)
+            prices_eur = {
+                "loose": _to_eur(pc["loose_usd"], eur_rate),
+                "complete": _to_eur(pc["cib_usd"], eur_rate),
+                "new": _to_eur(pc["new_usd"], eur_rate),
+                "graded": _to_eur(pc.get("graded_usd"), eur_rate),
+                "box_only": _to_eur(pc.get("box_only_usd"), eur_rate),
+                "manual_only": _to_eur(pc.get("manual_only_usd"), eur_rate),
+            }
             with get_db() as db:
                 db.execute(
                     """
                     INSERT INTO price_history
-                        (game_id, source, loose_price, complete_price, new_price, eur_rate, pricecharting_id)
-                    VALUES (?, 'pricecharting', ?, ?, ?, ?, ?)
+                        (game_id, source, loose_price, complete_price, new_price,
+                         graded_price, box_only_price, manual_only_price,
+                         eur_rate, pricecharting_id)
+                    VALUES (?, 'pricecharting', ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (game_id, loose_eur, cib_eur, new_eur, eur_rate, pc["pricecharting_id"]),
+                    (game_id,
+                     prices_eur["loose"], prices_eur["complete"], prices_eur["new"],
+                     prices_eur["graded"], prices_eur["box_only"], prices_eur["manual_only"],
+                     eur_rate, pc["pricecharting_id"]),
                 )
+                copies_updated = _apply_prices_to_copies(db, game_id, prices_eur)
                 db.commit()
-            return {"market_price": loose_eur, "source": "pricecharting", "condition": "loose"}
+            return {
+                "market_price": prices_eur["loose"],
+                "source": "pricecharting",
+                "prices": prices_eur,
+                "copies_updated": copies_updated,
+            }
 
     if ebay_enabled:
         ebay = await fetch_ebay_market_price(game["title"], game.get("platform_name") or "", item_type)
         if ebay:
+            prices_eur = {"loose": ebay["market_price"]}
             with get_db() as db:
                 db.execute(
                     """
@@ -140,6 +195,7 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
                     """,
                     (game_id, ebay["market_price"]),
                 )
+                copies_updated = _apply_prices_to_copies(db, game_id, prices_eur)
                 db.commit()
             return {
                 "market_price": ebay["market_price"],
@@ -147,6 +203,7 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
                 "sample_size": ebay["sample_size"],
                 "price_min": ebay["price_min"],
                 "price_max": ebay["price_max"],
+                "copies_updated": copies_updated,
             }
 
     if rawg_enabled:
@@ -264,21 +321,31 @@ async def _run_bulk_price_update(job_id: str, game_list: list) -> None:
             catalog = _lookup_local_catalog_price(game["title"], "")
 
         if catalog:
+            prices_eur = {
+                "loose": catalog["loose_eur"],
+                "complete": catalog["cib_eur"],
+                "new": catalog["new_eur"],
+                "graded": catalog.get("graded_eur"),
+                "box_only": catalog.get("box_only_eur"),
+                "manual_only": catalog.get("manual_only_eur"),
+            }
             with get_db() as db:
                 db.execute(
                     """
                     INSERT INTO price_history
-                        (game_id, source, loose_price, complete_price, new_price, eur_rate, pricecharting_id)
-                    VALUES (?, 'pricecharting', ?, ?, ?, 1.0, ?)
+                        (game_id, source, loose_price, complete_price, new_price,
+                         graded_price, box_only_price, manual_only_price,
+                         eur_rate, pricecharting_id)
+                    VALUES (?, 'pricecharting', ?, ?, ?, ?, ?, ?, 1.0, ?)
                     """,
                     (
                         game["id"],
-                        catalog["loose_eur"],
-                        catalog["cib_eur"],
-                        catalog["new_eur"],
+                        prices_eur["loose"], prices_eur["complete"], prices_eur["new"],
+                        prices_eur["graded"], prices_eur["box_only"], prices_eur["manual_only"],
                         catalog["pricecharting_id"] or None,
                     ),
                 )
+                _apply_prices_to_copies(db, game["id"], prices_eur)
                 db.commit()
             success += 1
             await asyncio.sleep(0.1)
@@ -286,22 +353,31 @@ async def _run_bulk_price_update(job_id: str, game_list: list) -> None:
 
         pc = await fetch_pricecharting(game["title"], game["platform_name"] or "")
         if pc:
+            prices_eur = {
+                "loose": _to_eur(pc["loose_usd"], eur_rate),
+                "complete": _to_eur(pc["cib_usd"], eur_rate),
+                "new": _to_eur(pc["new_usd"], eur_rate),
+                "graded": _to_eur(pc.get("graded_usd"), eur_rate),
+                "box_only": _to_eur(pc.get("box_only_usd"), eur_rate),
+                "manual_only": _to_eur(pc.get("manual_only_usd"), eur_rate),
+            }
             with get_db() as db:
                 db.execute(
                     """
                     INSERT INTO price_history
-                        (game_id, source, loose_price, complete_price, new_price, eur_rate, pricecharting_id)
-                    VALUES (?, 'pricecharting', ?, ?, ?, ?, ?)
+                        (game_id, source, loose_price, complete_price, new_price,
+                         graded_price, box_only_price, manual_only_price,
+                         eur_rate, pricecharting_id)
+                    VALUES (?, 'pricecharting', ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         game["id"],
-                        _to_eur(pc["loose_usd"], eur_rate),
-                        _to_eur(pc["cib_usd"], eur_rate),
-                        _to_eur(pc["new_usd"], eur_rate),
-                        eur_rate,
-                        pc["pricecharting_id"],
+                        prices_eur["loose"], prices_eur["complete"], prices_eur["new"],
+                        prices_eur["graded"], prices_eur["box_only"], prices_eur["manual_only"],
+                        eur_rate, pc["pricecharting_id"],
                     ),
                 )
+                _apply_prices_to_copies(db, game["id"], prices_eur)
                 db.commit()
             success += 1
         else:
@@ -337,6 +413,9 @@ class ManualPriceEntry(BaseModel):
     loose_price: Optional[float] = None
     complete_price: Optional[float] = None
     new_price: Optional[float] = None
+    graded_price: Optional[float] = None
+    box_only_price: Optional[float] = None
+    manual_only_price: Optional[float] = None
 
 
 class CatalogPriceApply(BaseModel):
@@ -355,13 +434,39 @@ async def add_manual_price(game_id: int, entry: ManualPriceEntry):
         db.execute(
             """
             INSERT INTO price_history
-                (game_id, source, loose_price, complete_price, new_price)
-            VALUES (?, 'manual', ?, ?, ?)
+                (game_id, source, loose_price, complete_price, new_price,
+                 graded_price, box_only_price, manual_only_price)
+            VALUES (?, 'manual', ?, ?, ?, ?, ?, ?)
             """,
-            (game_id, entry.loose_price, entry.complete_price, entry.new_price),
+            (
+                game_id,
+                entry.loose_price, entry.complete_price, entry.new_price,
+                entry.graded_price, entry.box_only_price, entry.manual_only_price,
+            ),
         )
         db.commit()
     return {"ok": True}
+
+
+class CopyValueUpdate(BaseModel):
+    current_value: Optional[float] = None
+
+
+@router.put("/api/games/{game_id}/copies/{copy_id}/current-value")
+async def set_copy_current_value(game_id: int, copy_id: int, payload: CopyValueUpdate):
+    """Set the per-copy baseline value used for P/L calculation."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT id FROM game_copies WHERE id = ? AND game_id = ?", (copy_id, game_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Copy not found")
+        db.execute(
+            "UPDATE game_copies SET current_value = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (payload.current_value, copy_id),
+        )
+        db.commit()
+    return {"ok": True, "copy_id": copy_id, "current_value": payload.current_value}
 
 
 @router.post("/api/games/{game_id}/price-from-catalog")

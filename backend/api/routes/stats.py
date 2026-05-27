@@ -9,22 +9,28 @@ router = APIRouter()
 async def get_stats():
     with get_db() as db:
         total_games = db.execute("SELECT COUNT(*) FROM games WHERE is_wishlist = 0").fetchone()[0]
+        # Value = sum of all copy current_values (only copies with a value set count)
         total_value = db.execute(
-            "SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0"
+            """SELECT COALESCE(SUM(gc.current_value), 0)
+               FROM game_copies gc JOIN games g ON gc.game_id = g.id
+               WHERE g.is_wishlist = 0 AND gc.current_value IS NOT NULL"""
         ).fetchone()[0]
         purchase_value = db.execute(
-            "SELECT COALESCE(SUM(COALESCE(purchase_price, 0) * quantity), 0) FROM games WHERE is_wishlist = 0"
+            """SELECT COALESCE(SUM(gc.purchase_price), 0)
+               FROM game_copies gc JOIN games g ON gc.game_id = g.id
+               WHERE g.is_wishlist = 0 AND gc.purchase_price IS NOT NULL"""
         ).fetchone()[0]
         wishlist_count = db.execute("SELECT COUNT(*) FROM games WHERE is_wishlist = 1").fetchone()[0]
 
         cursor = db.execute(
             """
             SELECT COALESCE(p.name, 'No Platform') as name,
-                   SUM(g.quantity) as count,
-                   COALESCE(SUM(COALESCE(g.current_value, 0) * g.quantity), 0) as value,
-                   COALESCE(SUM(COALESCE(g.purchase_price, 0) * g.quantity), 0) as invested
+                   COUNT(DISTINCT g.id) as count,
+                   COALESCE(SUM(gc.current_value), 0) as value,
+                   COALESCE(SUM(gc.purchase_price), 0) as invested
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
+            LEFT JOIN game_copies gc ON gc.game_id = g.id
             WHERE g.is_wishlist = 0
               AND COALESCE(g.item_type, 'game') IN ('game', 'console', 'controller', 'accessory')
             GROUP BY p.name
@@ -43,22 +49,23 @@ async def get_stats():
 
         cursor = db.execute(
             """
-            SELECT condition, SUM(quantity) as count
-            FROM games
-            WHERE is_wishlist = 0 AND condition IS NOT NULL
-            GROUP BY condition
+            SELECT gc.condition, COUNT(gc.id) as count
+            FROM game_copies gc JOIN games g ON gc.game_id = g.id
+            WHERE g.is_wishlist = 0 AND gc.condition IS NOT NULL
+            GROUP BY gc.condition
             """
         )
         by_condition = [dict_from_row(row) for row in cursor.fetchall()]
 
         cursor = db.execute(
             """
-            SELECT item_type, SUM(quantity) as count,
-                   COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) as value,
-                   COALESCE(SUM(COALESCE(purchase_price, 0) * quantity), 0) as invested
-            FROM games
-            WHERE is_wishlist = 0
-            GROUP BY item_type
+            SELECT g.item_type, COUNT(DISTINCT g.id) as count,
+                   COALESCE(SUM(gc.current_value), 0) as value,
+                   COALESCE(SUM(gc.purchase_price), 0) as invested
+            FROM games g
+            LEFT JOIN game_copies gc ON gc.game_id = g.id
+            WHERE g.is_wishlist = 0
+            GROUP BY g.item_type
             ORDER BY count DESC
             """
         )
@@ -71,11 +78,16 @@ async def get_stats():
 
         cursor = db.execute(
             """
-            SELECT id, title, cover_url, current_value, purchase_price, 
-                   COALESCE(current_value, 0) - COALESCE(purchase_price, 0) as profit_loss
-            FROM games
-            WHERE is_wishlist = 0
-            ORDER BY current_value DESC
+            SELECT g.id, g.title, g.cover_url,
+                   COALESCE(SUM(gc.current_value), 0) as current_value,
+                   COALESCE(SUM(gc.purchase_price), 0) as purchase_price,
+                   COALESCE(SUM(gc.current_value), 0) - COALESCE(SUM(gc.purchase_price), 0) as profit_loss
+            FROM games g
+            LEFT JOIN game_copies gc ON gc.game_id = g.id
+            WHERE g.is_wishlist = 0
+            GROUP BY g.id, g.title, g.cover_url
+            HAVING COALESCE(SUM(gc.current_value), 0) > 0
+            ORDER BY COALESCE(SUM(gc.current_value), 0) DESC
             LIMIT 15
             """
         )
@@ -83,13 +95,18 @@ async def get_stats():
 
         cursor = db.execute(
             """
-            SELECT id, title, cover_url, current_value, purchase_price, 
-                   (COALESCE(current_value, 0) - COALESCE(purchase_price, 0)) as profit_loss,
-                   CASE WHEN COALESCE(purchase_price, 0) > 0 
-                        THEN ((COALESCE(current_value, 0) - purchase_price) / purchase_price) * 100 
+            SELECT g.id, g.title, g.cover_url,
+                   COALESCE(SUM(gc.current_value), 0) as current_value,
+                   COALESCE(SUM(gc.purchase_price), 0) as purchase_price,
+                   COALESCE(SUM(gc.current_value), 0) - COALESCE(SUM(gc.purchase_price), 0) as profit_loss,
+                   CASE WHEN COALESCE(SUM(gc.purchase_price), 0) > 0
+                        THEN ((COALESCE(SUM(gc.current_value), 0) - SUM(gc.purchase_price)) / SUM(gc.purchase_price)) * 100
                         ELSE 0 END as percent_gain
-            FROM games
-            WHERE is_wishlist = 0 AND purchase_price > 0
+            FROM games g
+            LEFT JOIN game_copies gc ON gc.game_id = g.id
+            WHERE g.is_wishlist = 0
+            GROUP BY g.id, g.title, g.cover_url
+            HAVING COALESCE(SUM(gc.purchase_price), 0) > 0
             ORDER BY percent_gain DESC
             LIMIT 15
             """

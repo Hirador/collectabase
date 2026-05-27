@@ -16,6 +16,7 @@ export const gamesApi = {
   listCopies: (id) => apiGet(`/api/games/${id}/copies`),
   addCopy: (id, payload) => apiPost(`/api/games/${id}/copies`, payload),
   updateCopy: (id, copyId, payload) => apiPut(`/api/games/${id}/copies/${copyId}`, payload),
+  setCopyValue: (id, copyId, value) => apiPut(`/api/games/${id}/copies/${copyId}/current-value`, { current_value: value }),
   deleteCopy: (id, copyId) => apiDelete(`/api/games/${id}/copies/${copyId}`),
 }
 

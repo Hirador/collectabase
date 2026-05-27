@@ -86,6 +86,7 @@ class CopyCreate(BaseModel):
     purchase_price: Optional[float] = None
     purchase_date: Optional[str] = None
     location: Optional[str] = None
+    current_value: Optional[float] = None
     notes: Optional[str] = None
 
 
