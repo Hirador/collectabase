@@ -813,10 +813,8 @@ onMounted(async () => {
 }
 
 .modal {
-  background: var(--bg-light);
+  background: #18181b;
   border: 1px solid var(--glass-border);
-  backdrop-filter: var(--card-blur);
-  -webkit-backdrop-filter: var(--card-blur);
   border-radius: 12px;
   padding: 1.5rem;
   width: 100%;
