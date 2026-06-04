@@ -14,6 +14,19 @@ class BarcodeLookup(BaseModel):
     barcode: str
 
 
+class CatalogSearch(BaseModel):
+    query: str
+    platform_name: Optional[str] = None
+    source: Optional[str] = None
+    limit: Optional[int] = 25
+    serial_only: Optional[bool] = False
+
+
+class EditionLookup(BaseModel):
+    title: Optional[str] = None
+    igdb_id: Optional[int] = None
+
+
 class GameCreate(BaseModel):
     title: str
     platform_id: Optional[int] = None
@@ -31,6 +44,12 @@ class GameCreate(BaseModel):
     description: Optional[str] = None
     cover_url: Optional[str] = None
     region: Optional[str] = None
+    # Catalog-sourced disc/cart identity (Redump/No-Intro/GameDB lookup)
+    serial: Optional[str] = None
+    disc_revision: Optional[str] = None
+    languages: Optional[str] = None
+    edition: Optional[str] = None
+    catalog_source: Optional[str] = None
     condition: Optional[str] = None
     completeness: Optional[str] = None
     location: Optional[str] = None
@@ -64,6 +83,12 @@ class GameUpdate(GameCreate):
     description: Optional[str] = None
     cover_url: Optional[str] = None
     region: Optional[str] = None
+    # Catalog-sourced disc/cart identity (Redump/No-Intro/GameDB lookup)
+    serial: Optional[str] = None
+    disc_revision: Optional[str] = None
+    languages: Optional[str] = None
+    edition: Optional[str] = None
+    catalog_source: Optional[str] = None
     condition: Optional[str] = None
     completeness: Optional[str] = None
     location: Optional[str] = None

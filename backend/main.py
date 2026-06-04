@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
 load_dotenv(PROJECT_ROOT / "backend" / ".env")
 
+from .api.routes.catalog import router as catalog_router
 from .api.routes.games import router as games_router
 from .api.routes.import_export import UPLOADS_DIR, router as import_export_router
 from .api.routes.lookup import router as lookup_router
@@ -30,6 +31,7 @@ app = FastAPI(title="Collectabase", version=APP_VERSION)
 _startup_time = time.time()
 app.include_router(games_router)
 app.include_router(lookup_router)
+app.include_router(catalog_router)
 app.include_router(lots_router)
 app.include_router(import_export_router)
 app.include_router(stats_router)

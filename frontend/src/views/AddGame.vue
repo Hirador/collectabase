@@ -4,8 +4,8 @@
 
     <div class="form-layout">
       <!-- Metadata Search -->
-      <div class="card mb-3">
-        <h3>Search Metadata</h3>
+      <div v-if="step === 'search' || isEditMode" class="card mb-3">
+        <h3>{{ addHeading }}</h3>
         <div class="flex gap-2 mb-2 search-row">
           <select v-model="searchProvider" class="filter-select w-auto">
             <option value="combined">Games (IGDB/RAWG/GTDB)</option>
@@ -13,11 +13,15 @@
             <option value="hobbydb">Figures (HobbyDB)</option>
             <option value="mfc">Anime Figures (MFC)</option>
           </select>
-          <input v-model="igdbSearch" placeholder="Search by title..." @keyup.enter="searchIgdb" />
-          <button @click="searchIgdb" class="btn btn-secondary search-btn" :disabled="igdbLoading">
-            {{ igdbLoading ? 'Searching...' : 'Search' }}
+          <input v-model="igdbSearch" :placeholder="searchProvider === 'combined' ? 'Search by name or serial…' : 'Search by title…'" @keyup.enter="unifiedSearch" />
+          <button @click="unifiedSearch" class="btn btn-secondary search-btn" :disabled="igdbLoading || catalogLoading">
+            {{ (igdbLoading || catalogLoading) ? 'Searching...' : 'Search' }}
           </button>
         </div>
+        <p v-if="!isEditMode" class="text-muted" style="font-size:0.8rem;margin:0 0 0.5rem;">
+          {{ searchHelp }} or
+          <button type="button" class="link-btn" @click="enterManually">Enter manually →</button>
+        </p>
         <div v-if="igdbResults.length > 0" class="search-toolbar">
           <select v-model="sourceFilter" class="filter-select source-filter">
             <option v-for="opt in sourceOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
@@ -49,8 +53,49 @@
       </div>
       </div>
 
+      <!-- Serial step (add flow, games) -->
+      <div v-if="step === 'serial' && !isEditMode" class="card mb-3">
+        <h3>Which version of “{{ game.title }}”?</h3>
+
+        <!-- Idea 1: pick a region/version we found in our DB -->
+        <template v-if="serialMatches.length">
+          <p class="text-muted" style="font-size:0.85rem;margin:0 0 0.4rem;">
+            Found in our database — pick your region/version (fills serial, region & languages):
+          </p>
+          <ul class="serial-matches">
+            <li v-for="m in serialMatches" :key="m.id">
+              <button type="button" class="serial-match-btn" @click="applyCatalogMatch(m)">
+                {{ m.full_name }} — <strong>{{ m.serial || '—' }}</strong>
+                <span class="text-muted">({{ m.platform_name || m.system }})</span>
+              </button>
+            </li>
+          </ul>
+          <p class="text-muted" style="font-size:0.8rem;margin:0.6rem 0 0.3rem;">Not listed? Enter the serial manually:</p>
+        </template>
+        <p v-else class="text-muted" style="font-size:0.85rem;margin-top:0;">
+          The serial is on the disc/spine/box (e.g. SLUS-00594, the AYWP in NTP-AYWP-EIP). It autofills region, languages & platform.
+        </p>
+
+        <!-- Idea 2: tolerant manual serial entry -->
+        <div class="flex gap-2 mb-2 search-row">
+          <input v-model="game.serial" placeholder="Enter serial…" @keyup.enter="lookupSerial" />
+          <button type="button" @click="lookupSerial" class="btn btn-secondary search-btn" :disabled="catalogLoading || !game.serial">
+            {{ catalogLoading ? '...' : 'Look up' }}
+          </button>
+        </div>
+        <p v-if="catalogInfo" class="barcode-status">{{ catalogInfo }}</p>
+
+        <div class="flex gap-2 mt-2">
+          <button type="button" class="btn btn-primary" @click="proceedWithoutSerial">I don't have the serial — continue</button>
+          <button type="button" class="btn btn-secondary" @click="backToSearch">← Back</button>
+        </div>
+      </div>
+
       <!-- Game Form -->
-      <form @submit.prevent="saveGame" class="card">
+      <form v-if="step === 'form'" @submit.prevent="saveGame" class="card">
+        <div v-if="!isEditMode" class="mb-2">
+          <button type="button" class="link-btn" @click="backToSearch">← Start over</button>
+        </div>
         <div class="form-grid">
           <div class="form-group">
             <label>Title *</label>
@@ -100,15 +145,52 @@
           </div>
 
           <div class="form-group">
+            <label>Edition <span class="text-muted" style="font-weight:normal;font-size:0.75rem;">(optional)</span></label>
+            <input v-model="game.edition" list="edition-options" placeholder="Blank = Standard — or type any edition" />
+            <datalist id="edition-options">
+              <option v-for="e in editionOptions" :key="e" :value="e" />
+            </datalist>
+          </div>
+
+          <div class="form-group">
+            <label>Serial</label>
+            <div class="barcode-row">
+              <input v-model="game.serial" @keyup.enter="lookupSerial" placeholder="e.g. SLUS-00594, LA-H-AXN7A" />
+              <button type="button" class="btn btn-secondary barcode-btn" @click="lookupSerial" :disabled="catalogLoading || !game.serial" title="Autofill from catalog">
+                {{ catalogLoading ? '...' : '🔎' }}
+              </button>
+            </div>
+            <p v-if="catalogInfo" class="barcode-status">{{ catalogInfo }}</p>
+            <ul v-if="serialMatches.length > 1" class="serial-matches">
+              <li v-for="m in serialMatches" :key="m.id">
+                <button type="button" class="serial-match-btn" @click="applyCatalogMatch(m)">
+                  {{ m.full_name }} — {{ m.serial }} <span class="text-muted">({{ m.platform_name || m.system }})</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <div class="form-group">
             <label>Region</label>
             <select v-model="game.region">
               <option value="">Select</option>
-              <option>PAL</option>
-              <option>NTSC</option>
-              <option>EU</option>
-              <option>US</option>
-              <option>JP</option>
+              <option v-if="game.region && !REGIONS.includes(game.region)" :value="game.region">{{ game.region }}</option>
+              <option v-for="r in REGIONS" :key="r" :value="r">{{ r }}</option>
             </select>
+          </div>
+
+          <div class="form-group full-width">
+            <label>Languages</label>
+            <div class="lang-chips">
+              <button
+                v-for="code in LANGS"
+                :key="code"
+                type="button"
+                class="lang-chip"
+                :class="{ active: langActive(code) }"
+                @click="toggleLang(code)"
+              >{{ code }}</button>
+            </div>
           </div>
 
           <div class="form-group">
@@ -240,24 +322,8 @@
 
         </div>
 
-        <div v-if="duplicateWarning" class="duplicate-warning mt-3">
-          <span>⚠️ This game already exists in your collection.</span>
-          <div class="flex gap-2 mt-2 duplicate-actions">
-            <router-link v-if="duplicateWarning.existing_id" :to="`/game/${duplicateWarning.existing_id}`" class="btn btn-secondary">View existing</router-link>
-            <button type="button" class="btn btn-secondary" @click="saveAnyway" :disabled="saving">Save anyway</button>
-          </div>
-        </div>
-
-        <div class="flex gap-2 mt-3 form-actions">
-          <button type="submit" class="btn btn-primary" :disabled="saving">
-            {{ saving ? 'Saving...' : (isEditMode ? 'Update Item' : 'Save Item') }}
-          </button>
-          <router-link to="/" class="btn btn-secondary">Cancel</router-link>
-        </div>
-      </form>
-
       <!-- ADD COPIES — add mode only, hidden when adding to wishlist -->
-      <div v-if="!isEditMode && !game.is_wishlist" class="copies-section mt-3">
+      <div v-if="!isEditMode && !game.is_wishlist && step === 'form'" class="copies-section mt-3" @keydown.enter.prevent>
         <h3 class="copies-title">Add Copies</h3>
         <div class="copies-row">
           <!-- Copy 1 always shown inline -->
@@ -381,6 +447,22 @@
           </button>
         </div>
       </div>
+
+        <div v-if="duplicateWarning" class="duplicate-warning mt-3">
+          <span>⚠️ This game already exists in your collection.</span>
+          <div class="flex gap-2 mt-2 duplicate-actions">
+            <router-link v-if="duplicateWarning.existing_id" :to="`/game/${duplicateWarning.existing_id}`" class="btn btn-secondary">View existing</router-link>
+            <button type="button" class="btn btn-secondary" @click="saveAnyway" :disabled="saving">Save anyway</button>
+          </div>
+        </div>
+
+        <div class="flex gap-2 mt-3 form-actions">
+          <button type="submit" class="btn btn-primary" :disabled="saving">
+            {{ saving ? 'Saving...' : (isEditMode ? 'Update Item' : 'Save Item') }}
+          </button>
+          <router-link to="/" class="btn btn-secondary">Cancel</router-link>
+        </div>
+      </form>
 
       <!-- MY COPIES — edit mode only -->
       <div v-if="isEditMode" class="copies-section mt-3">
@@ -568,6 +650,73 @@ const scannerNoticeVisible = ref(false)
 const scannerVideo = ref(null)
 const barcodeLookupLoading = ref(false)
 const barcodeLookupInfo = ref('')
+// Catalog (Redump/No-Intro/GameDB) serial lookup + edition dropdown
+const editionOptions = ref([])
+const catalogLoading = ref(false)
+const catalogInfo = ref('')
+const serialMatches = ref([])
+
+// Stepped Add flow: 'search' (name or serial) -> 'serial' (prompt) -> 'form'
+const step = ref('search')
+
+// Category-aware labels/help based on the selected search provider
+const categoryLabel = computed(() => {
+  switch (searchProvider.value) {
+    case 'comicvine': return 'Comic'
+    case 'hobbydb': return 'Figure'
+    case 'mfc': return 'Anime Figure'
+    default: return 'Game'
+  }
+})
+const addHeading = computed(() =>
+  isEditMode.value
+    ? 'Search Metadata'
+    : `Add a${/^[aeiou]/i.test(categoryLabel.value) ? 'n' : ''} ${categoryLabel.value}`
+)
+const searchHelp = computed(() => {
+  if (searchProvider.value === 'combined') {
+    return 'Type a game name, or paste a serial (e.g. SLUS-00594) to autofill directly'
+  }
+  const label = categoryLabel.value.toLowerCase()
+  return `Type a${/^[aeiou]/.test(label) ? 'n' : ''} ${label} name`
+})
+
+// Region standard: Redump-style extended names
+const REGIONS = [
+  'USA', 'Europe', 'Japan', 'World', 'Asia', 'Australia', 'Brazil', 'Canada',
+  'China', 'France', 'Germany', 'Greece', 'Italy', 'Korea', 'Netherlands',
+  'Poland', 'Portugal', 'Russia', 'Scandinavia', 'Spain', 'Sweden', 'UK',
+]
+const REGION_ALIASES = {
+  eu: 'Europe', europe: 'Europe', pal: 'Europe',
+  us: 'USA', usa: 'USA', ntsc: 'USA', 'ntsc-u': 'USA',
+  jp: 'Japan', japan: 'Japan', 'ntsc-j': 'Japan',
+  uk: 'UK', world: 'World', asia: 'Asia',
+}
+function normalizeRegion(raw) {
+  if (!raw) return ''
+  const key = String(raw).trim().toLowerCase()
+  if (REGION_ALIASES[key]) return REGION_ALIASES[key]
+  // Title-case unknown single regions so "germany" -> "Germany"
+  const known = REGIONS.find(r => r.toLowerCase() === key)
+  return known || String(raw).trim()
+}
+
+// Languages as toggle chips (Redump-style two-letter codes)
+const LANGS = ['En', 'Fr', 'De', 'Es', 'It', 'Ja', 'Nl', 'Pt', 'Sv', 'Da', 'No', 'Fi', 'Pl', 'Ru', 'Ko', 'Zh']
+function langArray() {
+  return (game.value.languages || '').split(',').map(s => s.trim()).filter(Boolean)
+}
+function langActive(code) {
+  return langArray().some(l => l.toLowerCase() === code.toLowerCase())
+}
+function toggleLang(code) {
+  const cur = langArray()
+  const idx = cur.findIndex(l => l.toLowerCase() === code.toLowerCase())
+  if (idx >= 0) cur.splice(idx, 1)
+  else cur.push(code)
+  game.value.languages = cur.join(',') || null
+}
 const scannerFeatureEnabled = false
 let cameraStream = null
 let scanFrame = null
@@ -626,38 +775,47 @@ const rankedResults = computed(() => {
     })
 })
 
-const game = ref({
-  title: '',
-  platform_id: '',
-  item_type: 'game',
-  quantity: 1,
-  barcode: '',
-  region: '',
-  condition: '',
-  completeness: '',
-  purchase_price: null,
-  current_value: null,
-  purchase_date: null,
-  notes: '',
-  is_wishlist: false,
-  igdb_id: null,
-  comicvine_id: null,
-  hobbydb_id: null,
-  mfc_id: null,
-  cover_url: null,
-  genre: null,
-  description: null,
-  developer: null,
-  publisher: null,
-  release_date: null,
-  location: null,
-  wishlist_max_price: null,
-  character_name: null,
-  series_name: null,
-  scale: null,
-  funko_number: null,
-  vinyl_format: null
-})
+function emptyGame() {
+  return {
+    title: '',
+    platform_id: '',
+    item_type: 'game',
+    quantity: 1,
+    barcode: '',
+    region: '',
+    serial: '',
+    disc_revision: null,
+    languages: null,
+    edition: null,
+    catalog_source: null,
+    condition: '',
+    completeness: '',
+    purchase_price: null,
+    current_value: null,
+    purchase_date: null,
+    notes: '',
+    is_wishlist: false,
+    igdb_id: null,
+    comicvine_id: null,
+    hobbydb_id: null,
+    mfc_id: null,
+    cover_url: null,
+    genre: null,
+    description: null,
+    developer: null,
+    publisher: null,
+    release_date: null,
+    location: null,
+    wishlist_max_price: null,
+    character_name: null,
+    series_name: null,
+    scale: null,
+    funko_number: null,
+    vinyl_format: null
+  }
+}
+
+const game = ref(emptyGame())
 
 async function loadPlatforms() {
   const res = await platformsApi.list()
@@ -677,6 +835,11 @@ async function loadGame(id) {
         quantity: data.quantity ?? 1,
         barcode: data.barcode || '',
         region: data.region || '',
+        serial: data.serial || '',
+        disc_revision: data.disc_revision || null,
+        languages: data.languages || null,
+        edition: data.edition || null,
+        catalog_source: data.catalog_source || null,
         condition: data.condition || '',
         completeness: data.completeness || '',
         purchase_price: data.purchase_price ?? null,
@@ -723,13 +886,33 @@ async function searchIgdb() {
       ...(data.igdb || []),
       ...(data.rawg || []),
       ...(data.gametdb || [])
-    ]).slice(0, 18)
+    ]).slice(0, 30)
     searchErrors.value = data.errors || searchErrors.value
+    // Fallback: only when IGDB/RAWG/GameTDB find nothing, search our own catalog.
+    if (igdbResults.value.length === 0 && searchProvider.value === 'combined') {
+      await catalogNameFallback(igdbSearch.value)
+    }
   } catch (e) {
     console.error('Search failed:', e)
     notifyError('Search failed.')
   } finally {
     igdbLoading.value = false
+  }
+}
+
+async function catalogNameFallback(name) {
+  try {
+    const res = await lookupApi.catalog(name, { limit: 20 })
+    const rows = (res.data && res.data.results) || []
+    igdbResults.value = rows.map(r => ({
+      source: 'catalog',
+      title: r.full_name || r.title,
+      platforms: [r.platform_name || r.system].filter(Boolean),
+      cover_url: null,
+      _catalog: r,
+    }))
+  } catch (e) {
+    console.error('Catalog fallback failed:', e)
   }
 }
 
@@ -740,6 +923,7 @@ function sourceLabel(source) {
   if (normalized === 'comicvine') return '🦸 ComicVine'
   if (normalized === 'hobbydb') return '🤖 HobbyDB'
   if (normalized === 'mfc') return '🌸 MFC'
+  if (normalized === 'catalog') return '📀 Our DB'
   return '🎮 IGDB'
 }
 
@@ -880,6 +1064,18 @@ async function handleDetectedBarcode(rawValue) {
 }
 
 function fillFromIgdb(result) {
+  // Catalog fallback pick: serial/region/platform are already known.
+  if (result.source === 'catalog' && result._catalog) {
+    const r = result._catalog
+    game.value.title = r.title || result.title
+    applyCatalogMatch(r)
+    fetchEditions()
+    igdbResults.value = []
+    igdbSearch.value = ''
+    if (!isEditMode.value) step.value = 'form'
+    return
+  }
+
   const incomingCover = result.source === 'gametdb'
     ? (result.cover_front || result.cover_url)
     : result.cover_url
@@ -1016,6 +1212,21 @@ function fillFromIgdb(result) {
 
   igdbResults.value = []
   igdbSearch.value = ''
+
+  // Populate the Edition dropdown from IGDB editions + catalog tags for this title
+  fetchEditions()
+
+  // Add flow for games: ask for the serial next; everything else jumps to the form.
+  if (!isEditMode.value) {
+    catalogInfo.value = ''
+    serialMatches.value = []
+    if (game.value.item_type === 'game') {
+      step.value = 'serial'
+      fetchCatalogSuggestions()  // pre-load region/version options from our DB
+    } else {
+      step.value = 'form'
+    }
+  }
 }
 
 async function onCoverFileSelected(event) {
@@ -1051,11 +1262,164 @@ async function onCoverFileSelected(event) {
   }
 }
 
+function matchPlatformId(name) {
+  if (!name) return null
+  const n = String(name).toLowerCase()
+  const match = platforms.value.find(p => {
+    const pn = p.name.toLowerCase()
+    return pn === n || pn.includes(n) || n.includes(pn)
+  })
+  return match?.id ?? null
+}
+
+async function fetchEditions() {
+  try {
+    const res = await lookupApi.editions(game.value.title || '', game.value.igdb_id || null)
+    editionOptions.value = (res.data && res.data.editions) || []
+  } catch (e) {
+    editionOptions.value = []
+  }
+}
+
+function applyCatalogMatch(m) {
+  // D2: the serial pins the physical disc, so it wins on region/platform.
+  // D1: edition stays whatever the user chose — never overwritten here.
+  game.value.serial = m.serial || game.value.serial
+  game.value.region = normalizeRegion(m.region) || game.value.region
+  game.value.languages = m.languages || game.value.languages
+  game.value.disc_revision = m.revision || game.value.disc_revision
+  game.value.catalog_source = m.source || null
+  if (m.title && !game.value.title) game.value.title = m.title
+  const pid = matchPlatformId(m.platform_name || m.system)
+  if (pid) game.value.platform_id = pid
+  serialMatches.value = []
+  const bits = [m.region, m.languages].filter(Boolean).join(' · ')
+  catalogInfo.value = `✓ Matched ${m.full_name}${bits ? ` (${bits})` : ''}`
+  if (step.value === 'serial') step.value = 'form'
+}
+
+// Decide whether the unified field holds a serial or a name, and route it.
+function looksLikeSerial(q) {
+  const s = (q || '').trim()
+  if (!s) return false
+  if (/\s/.test(s)) return false       // serials have no spaces; names like "MediEvil 2" do
+  if (!/[0-9-]/.test(s)) return false  // a serial has a digit or a dash
+  return s.length <= 16
+}
+
+async function unifiedSearch() {
+  const q = (igdbSearch.value || '').trim()
+  if (!q) return
+  // Non-game providers (comics/figures) keep the plain name search.
+  if (searchProvider.value !== 'combined') return searchIgdb()
+
+  if (looksLikeSerial(q)) {
+    catalogLoading.value = true
+    try {
+      const res = await lookupApi.catalog(q, { serial_only: true })
+      const results = (res.data && res.data.results) || []
+      if (results.length === 1) {
+        game.value.serial = q
+        applyCatalogMatch(results[0])
+        fetchEditions()
+        step.value = 'form'
+        igdbSearch.value = ''
+        return
+      } else if (results.length > 1) {
+        game.value.serial = q
+        serialMatches.value = results.slice(0, 8)
+        catalogInfo.value = `${results.length} matches — pick the exact one:`
+        step.value = 'serial'
+        return
+      }
+      // No serial match -> fall through to a name search.
+    } finally {
+      catalogLoading.value = false
+    }
+  }
+  return searchIgdb()
+}
+
+function proceedWithoutSerial() {
+  game.value.catalog_source = game.value.catalog_source || 'manual'
+  catalogInfo.value = ''
+  step.value = 'form'
+}
+
+function enterManually() {
+  if (igdbSearch.value && !game.value.title) game.value.title = igdbSearch.value.trim()
+  step.value = 'form'
+}
+
+function backToSearch() {
+  step.value = 'search'
+  game.value = emptyGame()
+  igdbSearch.value = ''
+  igdbResults.value = []
+  editionOptions.value = []
+  serialMatches.value = []
+  catalogInfo.value = ''
+  extraCopies.value = []
+  duplicateWarning.value = null
+}
+
+async function lookupSerial() {
+  const q = (game.value.serial || '').trim()
+  if (!q) return
+  catalogLoading.value = true
+  catalogInfo.value = ''
+  serialMatches.value = []
+  try {
+    // serial_only + tolerant "contains" matching (e.g. NTP-AYWP-EIP -> AYWP)
+    const res = await lookupApi.catalog(q, { serial_only: true, limit: 10 })
+    const results = (res.data && res.data.results) || []
+    if (results.length === 0) {
+      catalogInfo.value = 'No catalog match — serial saved as entered.'
+    } else if (results.length === 1) {
+      applyCatalogMatch(results[0])
+    } else {
+      serialMatches.value = results.slice(0, 10)
+      catalogInfo.value = `${results.length} matches — pick the exact one:`
+    }
+  } catch (e) {
+    catalogInfo.value = 'Catalog lookup failed.'
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+// Idea 1: after the title is picked, suggest our DB's region/version entries.
+async function fetchCatalogSuggestions() {
+  const title = (game.value.title || '').trim()
+  if (!title) return
+  try {
+    const res = await lookupApi.catalog(title, { limit: 12 })
+    serialMatches.value = (res.data && res.data.results) || []
+  } catch (e) {
+    serialMatches.value = []
+  }
+}
+
+// v-model.number leaves "" (not null) when a number input is cleared, which
+// Pydantic rejects. Coerce empty/NaN numeric fields back to null.
+function cleanNumbers(obj) {
+  for (const f of ['purchase_price', 'current_value', 'wishlist_max_price']) {
+    const v = obj[f]
+    if (v === '' || v === undefined || (typeof v === 'number' && Number.isNaN(v))) {
+      obj[f] = null
+    }
+  }
+  return obj
+}
+
 async function saveGame() {
   saving.value = true
   duplicateWarning.value = null
   try {
-    const payload = { ...game.value }
+    const payload = cleanNumbers({ ...game.value })
+    if (payload.quantity === '' || payload.quantity == null || Number.isNaN(Number(payload.quantity))) {
+      payload.quantity = 1
+    }
     if (!payload.platform_id) {
       payload.platform_id = null
     } else {
@@ -1076,7 +1440,7 @@ async function saveGame() {
       if (!isEditMode.value && extraCopies.value.length > 0) {
         const newId = res.data.id
         for (const copy of extraCopies.value) {
-          await gamesApi.addCopy(newId, copy)
+          await gamesApi.addCopy(newId, cleanNumbers({ ...copy }))
         }
       }
       notifySuccess(isEditMode.value ? 'Game updated.' : 'Game created.')
@@ -1269,7 +1633,7 @@ function startEditCopy(copy) {
 async function saveCopyForm() {
   copySaving.value = true
   try {
-    const payload = { ...copyForm.value }
+    const payload = cleanNumbers({ ...copyForm.value })
     let res
     if (editingCopyId.value !== null) {
       res = await gamesApi.updateCopy(editId.value, editingCopyId.value, payload)
@@ -1327,6 +1691,7 @@ onMounted(async () => {
   if (route.params.id) {
     isEditMode.value = true
     editId.value = route.params.id
+    step.value = 'form'
     await loadGame(route.params.id)
     const res = await gamesApi.get(route.params.id)
     if (res.ok) copies.value = res.data.copies || []
@@ -1536,6 +1901,68 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
 }
 
+.serial-matches {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.serial-match-btn {
+  width: 100%;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.serial-match-btn:hover {
+  background: var(--surface-3, rgba(255, 255, 255, 0.08));
+}
+
+.lang-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.lang-chip {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.lang-chip:hover {
+  border-color: var(--primary, #6366f1);
+}
+
+.lang-chip.active {
+  background: var(--primary, #6366f1);
+  border-color: var(--primary, #6366f1);
+  color: #fff;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--primary, #818cf8);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}
+
 .scanner-info-note {
   color: #93c5fd;
   background: rgba(59, 130, 246, 0.1);
@@ -1632,6 +2059,11 @@ onUnmounted(() => {
 .duplicate-actions,
 .form-actions {
   flex-wrap: wrap;
+}
+
+/* Match the 1.5rem rhythm used by .copies-section so the gaps are even */
+.form-actions {
+  margin-top: 1.5rem;
 }
 
 @media (max-width: 639px) {

@@ -400,7 +400,7 @@ async def lookup_igdb_title(title: str):
             query = (
                 f'search "{title}"; fields '
                 "name,first_release_date,genres.name,platforms.name,cover.url,summary,"
-                "involved_companies.company.name; limit 8;"
+                "involved_companies.company.name; limit 30;"
             )
             games_response = await client.post(
                 "https://api.igdb.com/v4/games", headers=headers, content=query
@@ -437,6 +437,65 @@ async def lookup_igdb_title(title: str):
             return {"results": results}
     except Exception as e:
         return {"error": str(e), "results": []}
+
+
+async def lookup_igdb_editions(igdb_id: int):
+    """Return the named editions of an IGDB game (Collector's, GOTY, ...).
+
+    IGDB models editions as separate game entries pointing at the base game via
+    ``version_parent``; ``version_title`` holds the edition name.
+    """
+    client_id = _env_any("IGDB_CLIENT_ID")
+    client_secret = _env_any("IGDB_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return {"error": "IGDB credentials not configured", "editions": []}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            now = time.time()
+            if (
+                _igdb_token_cache.get("token")
+                and _igdb_token_cache.get("expires_at", 0) > now
+                and _igdb_token_cache.get("client_id") == client_id
+            ):
+                access_token = _igdb_token_cache["token"]
+            else:
+                token_response = await client.post(
+                    "https://id.twitch.tv/oauth2/token",
+                    params={
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "grant_type": "client_credentials",
+                    },
+                )
+                token_data = token_response.json()
+                access_token = token_data.get("access_token")
+                if not access_token:
+                    return {"error": "Failed to get IGDB access token", "editions": []}
+                _igdb_token_cache["token"] = access_token
+                _igdb_token_cache["client_id"] = client_id
+                _igdb_token_cache["expires_at"] = now + max(int(token_data.get("expires_in", 0)) - 60, 0)
+
+            headers = {"Client-ID": client_id, "Authorization": f"Bearer {access_token}"}
+            query = (
+                f"where version_parent = {int(igdb_id)}; "
+                "fields name,version_title; limit 40;"
+            )
+            resp = await client.post(
+                "https://api.igdb.com/v4/games", headers=headers, content=query
+            )
+            if resp.status_code >= 400:
+                return {"error": f"igdb_status_{resp.status_code}", "editions": []}
+            editions = []
+            for g in resp.json():
+                label = (g.get("version_title") or "").strip()
+                if not label and g.get("name"):
+                    label = g["name"].strip()
+                if label:
+                    editions.append(label)
+            return {"editions": editions}
+    except Exception as e:
+        return {"error": str(e), "editions": []}
 
 
 async def lookup_gametdb_title(title: str):

@@ -62,3 +62,6 @@ start.sh
 .DS_Store
 Thumbs.db
 
+
+# Local backups (DB snapshots + docker image tars)
+backups/

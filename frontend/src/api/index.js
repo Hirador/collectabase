@@ -30,6 +30,8 @@ export const lookupApi = {
   hobbydb: (title) => apiPost('/api/lookup/hobbydb', { title }),
   mfc: (title) => apiPost('/api/lookup/mfc', { title }),
   barcode: (barcode) => apiPost('/api/lookup/barcode', { barcode }),
+  catalog: (query, extra = {}) => apiPost('/api/lookup/catalog', { query, ...extra }),
+  editions: (title, igdb_id = null) => apiPost('/api/lookup/editions', { title, igdb_id }),
   consoleFallbacks: () => apiGet('/api/console-fallbacks')
 }
 
@@ -74,6 +76,15 @@ export const priceCatalogApi = {
     return apiPost(`/api/price-catalog/scrape${query ? `?${query}` : ''}`)
   },
   clear: (platform = null) => apiDelete(`/api/price-catalog${platform ? `?platform=${encodeURIComponent(platform)}` : ''}`)
+}
+
+export const jobsApi = {
+  get: (jobId) => apiGet(`/api/jobs/${jobId}`)
+}
+
+export const catalogApi = {
+  status: () => apiGet('/api/catalog/status'),
+  update: (force = false) => apiPost(`/api/catalog/update${force ? '?force=true' : ''}`)
 }
 
 export const lotsApi = {
