@@ -20,6 +20,11 @@ engine = create_engine(get_database_url(), connect_args={"check_same_thread": Fa
 def _set_sqlite_pragma(dbapi_conn, _):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON")
+    # WAL lets readers and a writer coexist without blocking each other — needed
+    # now that multiple users (e.g. co-owners of a shared collection) can write
+    # concurrently. busy_timeout makes a contending writer wait instead of erroring.
+    cursor.execute("PRAGMA journal_mode = WAL")
+    cursor.execute("PRAGMA busy_timeout = 5000")
     cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
