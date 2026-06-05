@@ -1,18 +1,48 @@
-const ADMIN_KEY_STORAGE = 'collectabase.admin_api_key'
+// Cookie-based session transport.
+// - credentials:'include' sends the httpOnly access cookie on every request.
+// - On unsafe methods we echo the cb_csrf cookie as X-CSRF-Token (double-submit).
+// - X-Collection-Id selects the active collection (workspace).
+// - A 401 triggers one silent refresh; if that fails we broadcast auth:expired
+//   so the app can redirect to the login screen.
 
-function readAdminApiKey() {
+const ACTIVE_COLLECTION_STORAGE = 'collectabase.active_collection'
+const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+function readCookie(name) {
+  if (typeof document === 'undefined') return ''
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+export function getActiveCollectionId() {
   if (typeof window === 'undefined') return ''
   try {
-    return String(window.localStorage.getItem(ADMIN_KEY_STORAGE) || '').trim()
+    return String(window.localStorage.getItem(ACTIVE_COLLECTION_STORAGE) || '').trim()
   } catch {
     return ''
   }
 }
 
-function withAdminHeaders(headers = {}) {
-  const key = readAdminApiKey()
-  if (!key) return { ...(headers || {}) }
-  return { ...(headers || {}), 'X-Admin-Key': key }
+export function setActiveCollectionId(value) {
+  if (typeof window === 'undefined') return
+  try {
+    const cleaned = String(value || '').trim()
+    if (cleaned) window.localStorage.setItem(ACTIVE_COLLECTION_STORAGE, cleaned)
+    else window.localStorage.removeItem(ACTIVE_COLLECTION_STORAGE)
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function withSessionHeaders(method, headers = {}) {
+  const result = { ...(headers || {}) }
+  const collectionId = getActiveCollectionId()
+  if (collectionId) result['X-Collection-Id'] = collectionId
+  if (UNSAFE.has(method.toUpperCase())) {
+    const csrf = readCookie('cb_csrf')
+    if (csrf) result['X-CSRF-Token'] = csrf
+  }
+  return result
 }
 
 async function parseJsonSafe(res) {
@@ -31,50 +61,86 @@ function getFilenameFromDisposition(disposition) {
   return asciiMatch?.[1] || null
 }
 
+let refreshPromise = null
+
+function notifyExpired() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth:expired'))
+  }
+}
+
+async function tryRefresh() {
+  // Collapse concurrent refreshes into a single in-flight request.
+  if (!refreshPromise) {
+    refreshPromise = fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: withSessionHeaders('POST'),
+    })
+      .then((res) => res.ok)
+      .catch(() => false)
+      .finally(() => { refreshPromise = null })
+  }
+  return refreshPromise
+}
+
+// Core fetch with one transparent refresh-retry on 401.
+async function coreFetch(url, init = {}, { allowRefresh = true } = {}) {
+  const res = await fetch(url, { credentials: 'include', ...init })
+  if (res.status === 401 && allowRefresh && !url.startsWith('/api/auth/')) {
+    const refreshed = await tryRefresh()
+    if (refreshed) {
+      return fetch(url, { credentials: 'include', ...init })
+    }
+    notifyExpired()
+  }
+  return res
+}
+
 export async function apiGet(url) {
-  const res = await fetch(url, { headers: withAdminHeaders() })
+  const res = await coreFetch(url, { headers: withSessionHeaders('GET') })
   const data = await parseJsonSafe(res)
   return { ok: res.ok, status: res.status, data }
 }
 
 export async function apiDelete(url) {
-  const res = await fetch(url, { method: 'DELETE', headers: withAdminHeaders() })
+  const res = await coreFetch(url, { method: 'DELETE', headers: withSessionHeaders('DELETE') })
   const data = await parseJsonSafe(res)
   return { ok: res.ok, status: res.status, data }
 }
 
 export async function apiPost(url, body, options = {}) {
   const init = { method: 'POST', ...options }
-  const customHeaders = withAdminHeaders(options.headers || {})
+  const customHeaders = withSessionHeaders('POST', options.headers || {})
   if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json', ...customHeaders }
     init.body = JSON.stringify(body)
-  } else if (Object.keys(customHeaders).length) {
+  } else {
     init.headers = customHeaders
   }
-  const res = await fetch(url, init)
+  const res = await coreFetch(url, init)
   const data = await parseJsonSafe(res)
   return { ok: res.ok, status: res.status, data }
 }
 
 export async function apiPut(url, body) {
-  const res = await fetch(url, {
+  const res = await coreFetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...withAdminHeaders() },
-    body: JSON.stringify(body)
+    headers: { 'Content-Type': 'application/json', ...withSessionHeaders('PUT') },
+    body: JSON.stringify(body),
   })
   const data = await parseJsonSafe(res)
   return { ok: res.ok, status: res.status, data }
 }
 
 export async function apiPostForm(url, formData) {
-  const res = await fetch(url, { method: 'POST', headers: withAdminHeaders(), body: formData })
+  const res = await coreFetch(url, { method: 'POST', headers: withSessionHeaders('POST'), body: formData })
   const data = await parseJsonSafe(res)
   return { ok: res.ok, status: res.status, data }
 }
 
 export async function apiDownload(url, fallbackFilename = 'download.bin') {
-  const res = await fetch(url, { headers: withAdminHeaders() })
+  const res = await coreFetch(url, { headers: withSessionHeaders('GET') })
   if (!res.ok) {
     const data = await parseJsonSafe(res)
     return { ok: false, status: res.status, data }
@@ -95,17 +161,13 @@ export async function apiDownload(url, fallbackFilename = 'download.bin') {
   return { ok: true, status: res.status, data: { filename } }
 }
 
+// --- deprecated admin-key shims (kept so legacy imports still compile) -------
+// Auth is now cookie-based; these are inert. Remove once Settings.vue drops the
+// old admin-key panel.
 export function getAdminApiKey() {
-  return readAdminApiKey()
+  return ''
 }
 
-export function setAdminApiKey(value) {
-  if (typeof window === 'undefined') return
-  try {
-    const cleaned = String(value || '').trim()
-    if (cleaned) window.localStorage.setItem(ADMIN_KEY_STORAGE, cleaned)
-    else window.localStorage.removeItem(ADMIN_KEY_STORAGE)
-  } catch {
-    // ignore storage errors
-  }
+export function setAdminApiKey() {
+  // no-op
 }

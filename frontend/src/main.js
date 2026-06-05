@@ -16,8 +16,11 @@ import Settings from './views/Settings.vue'
 import PriceBrowser from './views/PriceBrowser.vue'
 import MoreMenu from './views/MoreMenu.vue'
 import LotsView from './views/LotsView.vue'
+import Login from './views/Login.vue'
+import { useAuthStore } from './stores/auth'
 
 const routes = [
+  { path: '/login', component: Login, meta: { public: true } },
   { path: '/', component: GamesList },
   { path: '/game/:id', component: GameDetail, props: true },
   { path: '/add', component: AddGame },
@@ -45,6 +48,29 @@ const pinia = createPinia()
 const app = createApp(App)
 app.use(pinia)
 app.use(router)
+
+const auth = useAuthStore(pinia)
+
+// Probe the session once, then gate every navigation on auth.
+router.beforeEach(async (to) => {
+  if (!auth.ready) await auth.fetchMe()
+  if (!to.meta.public && !auth.isAuthed) {
+    return { path: '/login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} }
+  }
+  if (to.path === '/login' && auth.isAuthed) {
+    return '/'
+  }
+  return true
+})
+
+// http.js broadcasts this when a 401 can't be refreshed away.
+window.addEventListener('auth:expired', () => {
+  auth.handleExpired()
+  if (router.currentRoute.value.path !== '/login') {
+    router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
+  }
+})
+
 app.mount('#app')
 
 if ('serviceWorker' in navigator) {

@@ -3,7 +3,7 @@
     <NotificationStack />
 
     <!-- Desktop Sidebar -->
-    <aside class="desktop-sidebar" :class="{ 'collapsed': collapsed }">
+    <aside v-if="!isPublic" class="desktop-sidebar" :class="{ 'collapsed': collapsed }">
       <div class="sidebar-top">
         <router-link to="/" class="sidebar-logo">
           <img src="/icons/android-chrome-192x192.png" alt="Collectabase Logo" class="logo-img" />
@@ -34,20 +34,35 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div v-if="!collapsed && collections.length" class="collection-switcher">
+          <label>Collection</label>
+          <select :value="activeCollectionId" @change="onCollectionChange">
+            <option v-for="c in collections" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+        </div>
         <router-link to="/add" class="btn btn-primary add-btn" active-class="btn-active" title="Add Item">
           <span v-if="collapsed" style="font-size: 1.25rem;">+</span>
           <span v-else>+ Add Item</span>
         </router-link>
+        <div v-if="!collapsed && user" class="user-row">
+          <span class="user-email" :title="user.email">{{ user.display_name || user.email }}</span>
+          <button class="logout-btn" @click="logout" title="Log out">Log out</button>
+        </div>
       </div>
     </aside>
 
     <!-- Mobile Top Header -->
-    <header class="mobile-header">
+    <header v-if="!isPublic" class="mobile-header">
       <router-link to="/" class="logo">
         <img src="/icons/android-chrome-192x192.png" alt="Collectabase Logo" class="logo-img" />
         Collectabase
       </router-link>
-      <router-link to="/add" class="btn btn-primary btn-compact">+ Add</router-link>
+      <div class="mobile-header-actions">
+        <select v-if="collections.length > 1" class="mobile-collection" :value="activeCollectionId" @change="onCollectionChange">
+          <option v-for="c in collections" :key="c.id" :value="c.id">{{ c.name }}</option>
+        </select>
+        <router-link to="/add" class="btn btn-primary btn-compact">+ Add</router-link>
+      </div>
     </header>
 
     <main class="main-content">
@@ -55,7 +70,7 @@
     </main>
 
     <!-- Mobile-only bottom navigation -->
-    <nav class="mobile-nav" aria-label="Main navigation">
+    <nav v-if="!isPublic" class="mobile-nav" aria-label="Main navigation">
       <router-link to="/" active-class="" exact-active-class="nav-active">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -101,10 +116,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import NotificationStack from './components/NotificationStack.vue'
+import { useAuthStore } from './stores/auth'
 
 const collapsed = ref(false)
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
+const { user, collections, activeCollectionId } = storeToRefs(auth)
+
+// On /login (and any future public route) we render only the page, no app chrome.
+const isPublic = computed(() => !!route.meta.public)
 
 onMounted(() => {
   const saved = localStorage.getItem('collectabase_sidebar_collapsed')
@@ -116,6 +141,17 @@ onMounted(() => {
 function toggleSidebar() {
   collapsed.value = !collapsed.value
   localStorage.setItem('collectabase_sidebar_collapsed', String(collapsed.value))
+}
+
+function onCollectionChange(event) {
+  auth.setActiveCollection(event.target.value)
+  // Reload so every view refetches scoped to the newly active collection.
+  window.location.reload()
+}
+
+async function logout() {
+  await auth.logout()
+  router.push('/login')
 }
 </script>
 
@@ -254,6 +290,58 @@ function toggleSidebar() {
   margin-top: auto;
   padding-top: 1.5rem;
 }
+
+.collection-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+}
+.collection-switcher label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.collection-switcher select,
+.mobile-collection {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.6rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  font-size: 0.9rem;
+}
+.user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--glass-border);
+}
+.user-email {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.logout-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.logout-btn:hover { color: var(--text); }
+.mobile-header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.mobile-collection { width: auto; max-width: 40vw; }
 
 .add-btn {
   width: 100%;
