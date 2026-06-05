@@ -1,8 +1,9 @@
 import csv
 import io
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
 from .database import get_db
+from .auth.deps import ActiveCollection, active_collection, require_write
 
 router = APIRouter()
 
@@ -36,7 +37,9 @@ def normalize_item_type(type_str):
 
 
 @router.post("/api/import/clz")
-async def import_clz(file: UploadFile = File(...)):
+async def import_clz(file: UploadFile = File(...),
+                     ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     content = await file.read()
     try:
         text = content.decode("utf-8")
@@ -100,12 +103,13 @@ async def import_clz(file: UploadFile = File(...)):
             try:
                 db.execute("""
                     INSERT INTO games (
-                        title, platform_id, item_type, barcode, region, condition,
+                        collection_id, title, platform_id, item_type, barcode, region, condition,
                         completeness, purchase_price, current_value, purchase_date,
                         notes, genre, description, developer, publisher, release_date,
                         location, is_wishlist
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
+                    ac.id,
                     title,
                     pid,
                     normalize_item_type(row.get("item_type") or row.get("Type", "")),

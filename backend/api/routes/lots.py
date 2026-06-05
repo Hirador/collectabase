@@ -3,11 +3,12 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..errors import bad_request, not_found
 from ..schemas import LotCreate, LotItemCreate, LotItemUpdate, LotSaleUpsert, LotUpdate
 from ...database import dict_from_row, get_db
+from ...auth.deps import ActiveCollection, active_collection, require_write
 
 router = APIRouter()
 
@@ -52,8 +53,10 @@ def _ensure_status(status: str | None) -> str:
     return normalized
 
 
-def _get_lot_or_404(db, lot_id: int) -> dict:
-    row = db.execute("SELECT * FROM lots WHERE id = ?", (lot_id,)).fetchone()
+def _get_lot_or_404(db, lot_id: int, collection_id: int) -> dict:
+    row = db.execute(
+        "SELECT * FROM lots WHERE id = ? AND collection_id = ?", (lot_id, collection_id)
+    ).fetchone()
     lot = dict_from_row(row)
     if not lot:
         raise not_found("Lot not found")
@@ -88,8 +91,8 @@ def _load_sale_for_item(db, item_id: int) -> dict | None:
     return dict_from_row(row) if row else None
 
 
-def _recalculate_lot_allocations(db, lot_id: int) -> None:
-    lot = _get_lot_or_404(db, lot_id)
+def _recalculate_lot_allocations(db, lot_id: int, collection_id: int) -> None:
+    lot = _get_lot_or_404(db, lot_id, collection_id)
     items = _load_lot_items(db, lot_id)
     if not items:
         return
@@ -278,15 +281,15 @@ def _build_lot_payload(db, lot: dict) -> dict:
     }
 
 
-def _hydrate_item_from_game(db, game_id: int) -> dict:
+def _hydrate_item_from_game(db, game_id: int, collection_id: int) -> dict:
     row = db.execute(
         """
         SELECT g.id, g.title, g.item_type, p.name AS platform_name
         FROM games g
         LEFT JOIN platforms p ON g.platform_id = p.id
-        WHERE g.id = ?
+        WHERE g.id = ? AND g.collection_id = ?
         """,
-        (game_id,),
+        (game_id, collection_id),
     ).fetchone()
     game = dict_from_row(row)
     if not game:
@@ -295,15 +298,18 @@ def _hydrate_item_from_game(db, game_id: int) -> dict:
 
 
 @router.get("/api/lots")
-async def list_lots():
+async def list_lots(ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
-        cursor = db.execute("SELECT * FROM lots ORDER BY updated_at DESC, id DESC")
+        cursor = db.execute(
+            "SELECT * FROM lots WHERE collection_id = ? ORDER BY updated_at DESC, id DESC", (ac.id,)
+        )
         lots = [dict_from_row(row) for row in cursor.fetchall()]
         return [_build_lot_payload(db, lot) for lot in lots]
 
 
 @router.post("/api/lots")
-async def create_lot(payload: LotCreate):
+async def create_lot(payload: LotCreate, ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
         name = payload.name.strip()
         if not name:
@@ -311,11 +317,12 @@ async def create_lot(payload: LotCreate):
         cursor = db.execute(
             """
             INSERT INTO lots (
-                name, purchase_date, seller, purchase_price_gross,
+                collection_id, name, purchase_date, seller, purchase_price_gross,
                 shipping_in, fees_in, other_costs, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                ac.id,
                 name,
                 payload.purchase_date,
                 payload.seller,
@@ -326,23 +333,25 @@ async def create_lot(payload: LotCreate):
                 payload.notes,
             ),
         )
-        lot = _get_lot_or_404(db, cursor.lastrowid)
+        lot = _get_lot_or_404(db, cursor.lastrowid, ac.id)
         response = _build_lot_payload(db, lot)
         db.commit()
         return response
 
 
 @router.get("/api/lots/{lot_id}")
-async def get_lot(lot_id: int):
+async def get_lot(lot_id: int, ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
-        lot = _get_lot_or_404(db, lot_id)
+        lot = _get_lot_or_404(db, lot_id, ac.id)
         return _build_lot_payload(db, lot)
 
 
 @router.put("/api/lots/{lot_id}")
-async def update_lot(lot_id: int, payload: LotUpdate):
+async def update_lot(lot_id: int, payload: LotUpdate,
+                     ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        existing = _get_lot_or_404(db, lot_id)
+        existing = _get_lot_or_404(db, lot_id, ac.id)
         merged_name = payload.name.strip() if payload.name is not None else existing["name"]
         if not merged_name:
             raise bad_request("Lot name is required")
@@ -375,26 +384,29 @@ async def update_lot(lot_id: int, payload: LotUpdate):
                 lot_id,
             ),
         )
-        _recalculate_lot_allocations(db, lot_id)
-        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id))
+        _recalculate_lot_allocations(db, lot_id, ac.id)
+        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id, ac.id))
         db.commit()
         return response
 
 
 @router.delete("/api/lots/{lot_id}")
-async def delete_lot(lot_id: int):
+async def delete_lot(lot_id: int, ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        _get_lot_or_404(db, lot_id)
+        _get_lot_or_404(db, lot_id, ac.id)
         db.execute("DELETE FROM lots WHERE id = ?", (lot_id,))
         db.commit()
         return {"message": "Lot deleted successfully"}
 
 
 @router.post("/api/lots/{lot_id}/items")
-async def create_lot_item(lot_id: int, payload: LotItemCreate):
+async def create_lot_item(lot_id: int, payload: LotItemCreate,
+                          ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        _get_lot_or_404(db, lot_id)
-        linked_game = _hydrate_item_from_game(db, payload.game_id) if payload.game_id else None
+        _get_lot_or_404(db, lot_id, ac.id)
+        linked_game = _hydrate_item_from_game(db, payload.game_id, ac.id) if payload.game_id else None
         title_snapshot = payload.title_snapshot or (linked_game or {}).get("title")
         if not title_snapshot:
             raise bad_request("Lot items require either a linked collection item or a title")
@@ -421,22 +433,24 @@ async def create_lot_item(lot_id: int, payload: LotItemCreate):
                 payload.notes,
             ),
         )
-        _recalculate_lot_allocations(db, lot_id)
+        _recalculate_lot_allocations(db, lot_id, ac.id)
         item = _get_lot_item_or_404(db, cursor.lastrowid)
-        response = {"item_id": item["id"], "lot": _build_lot_payload(db, _get_lot_or_404(db, lot_id))}
+        response = {"item_id": item["id"], "lot": _build_lot_payload(db, _get_lot_or_404(db, lot_id, ac.id))}
         db.commit()
         return response
 
 
 @router.put("/api/lots/{lot_id}/items/{item_id}")
-async def update_lot_item(lot_id: int, item_id: int, payload: LotItemUpdate):
+async def update_lot_item(lot_id: int, item_id: int, payload: LotItemUpdate,
+                          ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        _get_lot_or_404(db, lot_id)
+        _get_lot_or_404(db, lot_id, ac.id)
         item = _get_lot_item_or_404(db, item_id)
         if item["lot_id"] != lot_id:
             raise not_found("Lot item not found")
 
-        linked_game = _hydrate_item_from_game(db, payload.game_id) if payload.game_id is not None and payload.game_id else None
+        linked_game = _hydrate_item_from_game(db, payload.game_id, ac.id) if payload.game_id is not None and payload.game_id else None
         game_id = payload.game_id if payload.game_id is not None else item.get("game_id")
         if payload.unlink_game or payload.game_id == 0:
             game_id = None
@@ -487,7 +501,7 @@ async def update_lot_item(lot_id: int, item_id: int, payload: LotItemUpdate):
                 item_id,
             ),
         )
-        _recalculate_lot_allocations(db, lot_id)
+        _recalculate_lot_allocations(db, lot_id, ac.id)
 
         sale = _load_sale_for_item(db, item_id)
         if sale:
@@ -500,30 +514,36 @@ async def update_lot_item(lot_id: int, item_id: int, payload: LotItemUpdate):
                 (round(net_proceeds - allocated, 2), item_id),
             )
 
-        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id))
+        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id, ac.id))
         db.commit()
         return response
 
 
 @router.delete("/api/lots/{lot_id}/items/{item_id}")
-async def delete_lot_item(lot_id: int, item_id: int):
+async def delete_lot_item(lot_id: int, item_id: int,
+                          ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        _get_lot_or_404(db, lot_id)
+        _get_lot_or_404(db, lot_id, ac.id)
         item = _get_lot_item_or_404(db, item_id)
         if item["lot_id"] != lot_id:
             raise not_found("Lot item not found")
         db.execute("DELETE FROM lot_items WHERE id = ?", (item_id,))
-        _recalculate_lot_allocations(db, lot_id)
-        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id))
+        _recalculate_lot_allocations(db, lot_id, ac.id)
+        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id, ac.id))
         db.commit()
         return response
 
 
 @router.post("/api/lots/items/{item_id}/sale")
-async def upsert_lot_item_sale(item_id: int, payload: LotSaleUpsert):
+async def upsert_lot_item_sale(item_id: int, payload: LotSaleUpsert,
+                               ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
         item = _get_lot_item_or_404(db, item_id)
         lot_id = item["lot_id"]
+        # Verify the item's lot is in the active collection before mutating.
+        _get_lot_or_404(db, lot_id, ac.id)
         allocated = _money(item.get("allocated_cost_basis"))
         gross = _money(payload.sale_price_gross)
         fees = _money(payload.platform_fees)
@@ -582,16 +602,19 @@ async def upsert_lot_item_sale(item_id: int, payload: LotSaleUpsert):
                 "UPDATE lot_items SET status = 'sold', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (item_id,),
             )
-        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id))
+        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id, ac.id))
         db.commit()
         return response
 
 
 @router.delete("/api/lots/items/{item_id}/sale")
-async def delete_lot_item_sale(item_id: int):
+async def delete_lot_item_sale(item_id: int, ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
         item = _get_lot_item_or_404(db, item_id)
         lot_id = item["lot_id"]
+        # Verify the item's lot is in the active collection before mutating.
+        _get_lot_or_404(db, lot_id, ac.id)
         existing_sale = _load_sale_for_item(db, item_id)
         if not existing_sale:
             raise not_found("Sale record not found")
@@ -601,6 +624,6 @@ async def delete_lot_item_sale(item_id: int):
                 "UPDATE lot_items SET status = 'inventory', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (item_id,),
             )
-        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id))
+        response = _build_lot_payload(db, _get_lot_or_404(db, lot_id, ac.id))
         db.commit()
         return response

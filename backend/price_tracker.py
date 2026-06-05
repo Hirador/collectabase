@@ -6,7 +6,10 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from .api.security import require_admin_access
+from .auth.deps import (
+    ActiveCollection, CurrentUser, active_collection, get_current_user,
+    require_super_admin, require_write,
+)
 from .database import dict_from_row, get_db, set_app_meta
 from . import jobs
 
@@ -51,23 +54,31 @@ def _apply_prices_to_copies(db, game_id: int, prices_eur: dict) -> list:
             })
     return updated
 
-def _get_game_for_price_lookup(game_id: int):
+def _get_game_for_price_lookup(game_id: int, collection_id: int):
     with get_db() as db:
         row = db.execute(
             """
             SELECT g.*, p.name as platform_name
             FROM games g LEFT JOIN platforms p ON g.platform_id = p.id
-            WHERE g.id = ?
+            WHERE g.id = ? AND g.collection_id = ?
             """,
-            (game_id,),
+            (game_id, collection_id),
         ).fetchone()
     return dict_from_row(row) if row else None
 
 
+def _game_in_collection(db, game_id: int, collection_id: int) -> bool:
+    return db.execute(
+        "SELECT 1 FROM games WHERE id = ? AND collection_id = ?", (game_id, collection_id)
+    ).fetchone() is not None
+
+
 @router.post("/api/games/{game_id}/fetch-market-price")
-async def fetch_market_price(game_id: int, source: Optional[str] = None):
+async def fetch_market_price(game_id: int, source: Optional[str] = None,
+                             ac: ActiveCollection = Depends(active_collection)):
     """Primary source: PriceCharting scraper. Fallback: eBay Browse."""
-    game = _get_game_for_price_lookup(game_id)
+    require_write(ac)
+    game = _get_game_for_price_lookup(game_id, ac.id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
@@ -220,15 +231,17 @@ async def fetch_market_price(game_id: int, source: Optional[str] = None):
 
 
 @router.post("/api/games/{game_id}/price-check")
-async def check_price(game_id: int):
+async def check_price(game_id: int, ac: ActiveCollection = Depends(active_collection)):
     """Backward-compatible alias."""
-    return await fetch_market_price(game_id)
+    return await fetch_market_price(game_id, ac=ac)
 
 
 @router.get("/api/games/{game_id}/price-history")
-async def get_price_history(game_id: int):
+async def get_price_history(game_id: int, ac: ActiveCollection = Depends(active_collection)):
     """Return the last 20 price snapshots for a game."""
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise HTTPException(status_code=404, detail="Game not found")
         rows = db.execute(
             """
             SELECT * FROM price_history
@@ -242,9 +255,13 @@ async def get_price_history(game_id: int):
 
 
 @router.delete("/api/games/{game_id}/price-history/{entry_id}")
-async def delete_price_history_entry(game_id: int, entry_id: int):
+async def delete_price_history_entry(game_id: int, entry_id: int,
+                                     ac: ActiveCollection = Depends(active_collection)):
     """Delete any price history entry (manual or provider)."""
+    require_write(ac)
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise HTTPException(status_code=404, detail="Game not found")
         row = db.execute(
             "SELECT id, game_id, source FROM price_history WHERE id = ?",
             (entry_id,),
@@ -263,36 +280,24 @@ async def delete_price_history_entry(game_id: int, entry_id: int):
 async def bulk_price_update(
     background_tasks: BackgroundTasks,
     limit: int = 100,
-    _admin: None = Depends(require_admin_access),
+    ac: ActiveCollection = Depends(active_collection),
 ):
-    """Kick off a background job to fetch prices for up to `limit` games.
-    Returns immediately with a job_id. Poll /api/jobs/{job_id} for progress.
+    """Kick off a background job to fetch prices for up to `limit` games in the
+    active collection. Returns immediately with a job_id; poll /api/jobs/{job_id}.
     """
+    require_write(ac)
     with get_db() as db:
-        try:
-            rows = db.execute(
-                """
-                SELECT g.id, g.title, g.item_type, p.name as platform_name
-                FROM games g
-                LEFT JOIN platforms p ON g.platform_id = p.id
-                WHERE g.is_wishlist = 0
-                ORDER BY g.id ASC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        except Exception as e:
-            logger.warning(f"Bulk price update query with is_wishlist filter failed, falling back: {e}")
-            rows = db.execute(
-                """
-                SELECT g.id, g.title, g.item_type, p.name as platform_name
-                FROM games g
-                LEFT JOIN platforms p ON g.platform_id = p.id
-                ORDER BY g.id ASC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+        rows = db.execute(
+            """
+            SELECT g.id, g.title, g.item_type, p.name as platform_name
+            FROM games g
+            LEFT JOIN platforms p ON g.platform_id = p.id
+            WHERE g.is_wishlist = 0 AND g.collection_id = ?
+            ORDER BY g.id ASC
+            LIMIT ?
+            """,
+            (ac.id, limit),
+        ).fetchall()
         game_list = [dict_from_row(r) for r in rows]
 
     job_id = jobs.start("bulk_price_update", total=len(game_list))
@@ -395,7 +400,7 @@ async def _run_bulk_price_update(job_id: str, game_list: list) -> None:
 
 
 @router.get("/api/jobs/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, _user: CurrentUser = Depends(get_current_user)):
     """Poll the status of a background job."""
     job = jobs.get(job_id)
     if not job:
@@ -404,7 +409,7 @@ async def get_job_status(job_id: str):
 
 
 @router.get("/api/jobs")
-async def list_active_jobs():
+async def list_active_jobs(_user: CurrentUser = Depends(get_current_user)):
     """Return all currently running background jobs."""
     return jobs.list_active()
 
@@ -423,10 +428,14 @@ class CatalogPriceApply(BaseModel):
 
 
 @router.post("/api/games/{game_id}/price-manual")
-async def add_manual_price(game_id: int, entry: ManualPriceEntry):
+async def add_manual_price(game_id: int, entry: ManualPriceEntry,
+                           ac: ActiveCollection = Depends(active_collection)):
     """Save a manually entered price snapshot (source='manual')."""
+    require_write(ac)
     with get_db() as db:
-        row = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
+        row = db.execute(
+            "SELECT id FROM games WHERE id = ? AND collection_id = ?", (game_id, ac.id)
+        ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
 
@@ -453,9 +462,13 @@ class CopyValueUpdate(BaseModel):
 
 
 @router.put("/api/games/{game_id}/copies/{copy_id}/current-value")
-async def set_copy_current_value(game_id: int, copy_id: int, payload: CopyValueUpdate):
+async def set_copy_current_value(game_id: int, copy_id: int, payload: CopyValueUpdate,
+                                 ac: ActiveCollection = Depends(active_collection)):
     """Set the per-copy baseline value used for P/L calculation."""
+    require_write(ac)
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise HTTPException(status_code=404, detail="Game not found")
         row = db.execute(
             "SELECT id FROM game_copies WHERE id = ? AND game_id = ?", (copy_id, game_id)
         ).fetchone()
@@ -470,9 +483,13 @@ async def set_copy_current_value(game_id: int, copy_id: int, payload: CopyValueU
 
 
 @router.post("/api/games/{game_id}/price-from-catalog")
-async def apply_catalog_price(game_id: int, payload: CatalogPriceApply):
+async def apply_catalog_price(game_id: int, payload: CatalogPriceApply,
+                              ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        game = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
+        game = db.execute(
+            "SELECT id FROM games WHERE id = ? AND collection_id = ?", (game_id, ac.id)
+        ).fetchone()
         if not game:
             raise HTTPException(status_code=404, detail="Game not found")
 
@@ -517,7 +534,7 @@ async def apply_catalog_price(game_id: int, payload: CatalogPriceApply):
 async def scrape_catalog(
     platform: str = "all",
     q: Optional[str] = None,
-    _admin: None = Depends(require_admin_access),
+    _admin: CurrentUser = Depends(require_super_admin),
 ):
     """Scrape PriceCharting catalog for one or all platforms into price_catalog table."""
     query = (q or "").strip()
@@ -629,35 +646,25 @@ async def scrape_catalog(
 
 
 @router.post("/api/price-catalog/enrich-library")
-async def enrich_catalog_from_library(limit: int = 120, _admin: None = Depends(require_admin_access)):
+async def enrich_catalog_from_library(limit: int = 120,
+                                      ac: ActiveCollection = Depends(active_collection)):
     """
-    Fill price_catalog incrementally by scraping titles already present in the local library.
-    This helps grow coverage beyond the paginated console-catalog scrape.
+    Fill price_catalog incrementally by scraping titles present in the active
+    collection's library. Grows coverage beyond the paginated console scrape.
     """
+    require_write(ac)
     with get_db() as db:
-        try:
-            rows = db.execute(
-                """
-                SELECT g.id, g.title, p.name as platform_name
-                FROM games g
-                LEFT JOIN platforms p ON g.platform_id = p.id
-                WHERE g.is_wishlist = 0
-                ORDER BY g.updated_at DESC, g.id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        except Exception:
-            rows = db.execute(
-                """
-                SELECT g.id, g.title, p.name as platform_name
-                FROM games g
-                LEFT JOIN platforms p ON g.platform_id = p.id
-                ORDER BY g.id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+        rows = db.execute(
+            """
+            SELECT g.id, g.title, p.name as platform_name
+            FROM games g
+            LEFT JOIN platforms p ON g.platform_id = p.id
+            WHERE g.is_wishlist = 0 AND g.collection_id = ?
+            ORDER BY g.updated_at DESC, g.id DESC
+            LIMIT ?
+            """,
+            (ac.id, limit),
+        ).fetchall()
 
     games = [dict_from_row(r) for r in rows]
     scanned = len(games)
@@ -736,6 +743,7 @@ async def search_catalog(
     order: str = "asc",
     page: int = 1,
     limit: int = 50,
+    _user: CurrentUser = Depends(get_current_user),
 ):
     """Search and paginate the local price catalog."""
     allowed_sorts = {"title", "platform", "loose_eur", "cib_eur", "new_eur"}
@@ -781,7 +789,7 @@ async def search_catalog(
 
 
 @router.get("/api/price-catalog/platforms")
-async def catalog_platforms():
+async def catalog_platforms(_user: CurrentUser = Depends(get_current_user)):
     """Return distinct platforms present in the price catalog."""
     with get_db() as db:
         rows = db.execute(
@@ -791,7 +799,8 @@ async def catalog_platforms():
 
 
 @router.delete("/api/price-catalog")
-async def clear_catalog(platform: Optional[str] = None, _admin: None = Depends(require_admin_access)):
+async def clear_catalog(platform: Optional[str] = None,
+                        _admin: CurrentUser = Depends(require_super_admin)):
     """Delete all (or one platform's) entries from the price catalog."""
     with get_db() as db:
         if platform:

@@ -5,9 +5,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from ..errors import bad_request, not_found
-from ..security import require_admin_access
 from ..schemas import BarcodeLookup, TitleSearch, IGDBSearch
 from ...database import dict_from_row, get_db, set_app_meta
+from ...auth.deps import (
+    ActiveCollection, CurrentUser, active_collection, get_current_user, require_write,
+)
 from ... import jobs
 from ...services.lookup_service import (
     cache_remote_cover,
@@ -67,7 +69,7 @@ def _should_use_console_placeholder(item: dict) -> bool:
 
 
 @router.get("/api/console-fallbacks")
-async def list_console_fallbacks():
+async def list_console_fallbacks(_user: CurrentUser = Depends(get_current_user)):
     if not FALLBACKS_DIR.is_dir():
         return {"items": []}
 
@@ -98,30 +100,30 @@ async def list_console_fallbacks():
 
 
 @router.post("/api/lookup/igdb")
-async def lookup_igdb(search: IGDBSearch):
+async def lookup_igdb(search: IGDBSearch, _user: CurrentUser = Depends(get_current_user)):
     return await lookup_igdb_title(search.title)
 
 
 @router.post("/api/lookup/gametdb")
-async def lookup_gametdb(search: IGDBSearch):
+async def lookup_gametdb(search: IGDBSearch, _user: CurrentUser = Depends(get_current_user)):
     return await lookup_gametdb_title(search.title)
 
 
 @router.post("/api/lookup/rawg")
-async def lookup_rawg(search: IGDBSearch):
+async def lookup_rawg(search: IGDBSearch, _user: CurrentUser = Depends(get_current_user)):
     return await lookup_rawg_title(search.title)
 
 
 @router.post("/api/lookup/combined")
-async def lookup_combined(search: TitleSearch):
+async def lookup_combined(search: TitleSearch, _user: CurrentUser = Depends(get_current_user)):
     return await lookup_combined_title(search.title)
 
 @router.post("/api/lookup/comicvine")
-async def lookup_comicvine(search: TitleSearch):
+async def lookup_comicvine(search: TitleSearch, _user: CurrentUser = Depends(get_current_user)):
     return await lookup_comicvine_title(search.title)
 
 @router.post("/api/lookup/hobbydb")
-async def lookup_hobbydb(search: TitleSearch):
+async def lookup_hobbydb(search: TitleSearch, _user: CurrentUser = Depends(get_current_user)):
     data = await lookup_hobbydb_title(search.title)
     # Cache cover images locally so search result thumbnails don't break
     for result in data.get("results", []):
@@ -130,7 +132,7 @@ async def lookup_hobbydb(search: TitleSearch):
     return data
 
 @router.post("/api/lookup/mfc")
-async def lookup_mfc(search: TitleSearch):
+async def lookup_mfc(search: TitleSearch, _user: CurrentUser = Depends(get_current_user)):
     data = await lookup_mfc_title(search.title)
     # Cache cover images locally so search result thumbnails don't break
     for result in data.get("results", []):
@@ -140,7 +142,8 @@ async def lookup_mfc(search: TitleSearch):
 
 
 @router.post("/api/lookup/barcode")
-async def lookup_barcode(search: BarcodeLookup):
+async def lookup_barcode(search: BarcodeLookup,
+                         ac: ActiveCollection = Depends(active_collection)):
     normalized = normalize_barcode(search.barcode)
     if len(normalized) < 8:
         raise bad_request("Invalid barcode. Please scan a valid UPC/EAN code.")
@@ -151,11 +154,12 @@ async def lookup_barcode(search: BarcodeLookup):
             SELECT g.id, g.title, g.platform_id, g.barcode, g.cover_url, p.name AS platform_name
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
-            WHERE REPLACE(REPLACE(REPLACE(COALESCE(g.barcode, ''), ' ', ''), '-', ''), '.', '') = ?
+            WHERE g.collection_id = ?
+              AND REPLACE(REPLACE(REPLACE(COALESCE(g.barcode, ''), ' ', ''), '-', ''), '.', '') = ?
             ORDER BY g.updated_at DESC
             LIMIT 1
             """,
-            (normalized,),
+            (ac.id, normalized),
         ).fetchone()
 
     existing_item = dict_from_row(existing) if existing else None
@@ -216,15 +220,16 @@ async def lookup_barcode(search: BarcodeLookup):
 
 
 @router.post("/api/games/{game_id}/enrich")
-async def enrich_game_cover(game_id: int):
+async def enrich_game_cover(game_id: int, ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
         row = db.execute(
             """
             SELECT g.*, p.name as platform_name, p.type as platform_type
             FROM games g LEFT JOIN platforms p ON g.platform_id = p.id
-            WHERE g.id = ?
+            WHERE g.id = ? AND g.collection_id = ?
             """,
-            (game_id,),
+            (game_id, ac.id),
         ).fetchone()
         if not row:
             raise not_found("Game not found")
@@ -265,15 +270,17 @@ async def enrich_game_cover(game_id: int):
 
 
 @router.post("/api/games/{game_id}/cover-placeholder")
-async def set_console_placeholder_cover(game_id: int):
+async def set_console_placeholder_cover(game_id: int,
+                                        ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
         row = db.execute(
             """
             SELECT g.*, p.name as platform_name, p.type as platform_type
             FROM games g LEFT JOIN platforms p ON g.platform_id = p.id
-            WHERE g.id = ?
+            WHERE g.id = ? AND g.collection_id = ?
             """,
-            (game_id,),
+            (game_id, ac.id),
         ).fetchone()
         if not row:
             raise not_found("Game not found")
@@ -299,20 +306,22 @@ async def set_console_placeholder_cover(game_id: int):
 async def enrich_all_covers(
     background_tasks: BackgroundTasks,
     limit: int = 20,
-    _admin: None = Depends(require_admin_access),
+    ac: ActiveCollection = Depends(active_collection),
 ):
-    """Kick off a background job to enrich covers for up to `limit` items.
-    Returns immediately with a job_id. Poll /api/jobs/{job_id} for progress.
+    """Kick off a background job to enrich covers for up to `limit` items in the
+    active collection. Returns immediately with a job_id; poll /api/jobs/{job_id}.
     """
+    require_write(ac)
     with get_db() as db:
         rows = db.execute(
             """
             SELECT g.*, p.name as platform_name, p.type as platform_type
             FROM games g LEFT JOIN platforms p ON g.platform_id = p.id
             WHERE (g.cover_url IS NULL OR g.cover_url = '') AND g.is_wishlist = 0
+              AND g.collection_id = ?
             LIMIT ?
             """,
-            (limit,),
+            (ac.id, limit),
         ).fetchall()
         items = [dict_from_row(row) for row in rows]
 

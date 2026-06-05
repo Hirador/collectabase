@@ -5,23 +5,26 @@ serial/name lookup that feeds the Add Game flow.
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from ..schemas import CatalogSearch, EditionLookup
-from ..security import require_admin_access
 from ... import jobs
 from ...database import get_db
+from ...auth.deps import (
+    ActiveCollection, CurrentUser, active_collection, get_current_user, require_super_admin,
+)
 from ...services.catalog import catalog_db
 from ...services.catalog.dat_import import update_catalog
 from ...services.catalog.systems import all_systems
 from ...services.lookup_service import lookup_igdb_editions
 
 
-def _collection_editions() -> list[str]:
-    """Distinct editions the user has already entered, so they reuse consistent
-    names across their own collection."""
+def _collection_editions(collection_id: int) -> list[str]:
+    """Distinct editions already entered in this collection, so members reuse
+    consistent names."""
     try:
         with get_db() as db:
             rows = db.execute(
                 "SELECT DISTINCT edition FROM games "
-                "WHERE edition IS NOT NULL AND TRIM(edition) != '' ORDER BY edition"
+                "WHERE edition IS NOT NULL AND TRIM(edition) != '' AND collection_id = ? ORDER BY edition",
+                (collection_id,),
             ).fetchall()
         return [r["edition"] for r in rows]
     except Exception:
@@ -52,7 +55,7 @@ def _run_catalog_update(job_id: str, force: bool) -> None:
 async def catalog_update(
     background_tasks: BackgroundTasks,
     force: bool = False,
-    _admin: None = Depends(require_admin_access),
+    _admin: CurrentUser = Depends(require_super_admin),
 ):
     """Kick off a background catalog import. Poll /api/jobs/{job_id} for progress.
 
@@ -66,7 +69,7 @@ async def catalog_update(
 
 
 @router.get("/api/catalog/status")
-async def catalog_status():
+async def catalog_status(_user: CurrentUser = Depends(get_current_user)):
     """Catalog size, per-system breakdown, and when it was last updated."""
     catalog_db.init_catalog_db()
     stats = catalog_db.get_stats()
@@ -88,7 +91,8 @@ async def catalog_status():
 
 
 @router.post("/api/lookup/editions")
-async def lookup_editions(payload: EditionLookup):
+async def lookup_editions(payload: EditionLookup,
+                          ac: ActiveCollection = Depends(active_collection)):
     """Edition options for the Add Game dropdown: 'Standard' first, then IGDB
     editions (Collector's/GOTY/...), then catalog edition tags (Platinum/Greatest
     Hits), then common presets. De-duplicated, case-insensitive."""
@@ -102,8 +106,8 @@ async def lookup_editions(payload: EditionLookup):
             seen.add(key)
             editions.append(label)
 
-    # The user's own editions first (consistency), then IGDB, catalog, presets.
-    for e in _collection_editions():
+    # The collection's own editions first (consistency), then IGDB, catalog, presets.
+    for e in _collection_editions(ac.id):
         add(e)
     if payload.igdb_id:
         igdb = await lookup_igdb_editions(payload.igdb_id)
@@ -119,7 +123,7 @@ async def lookup_editions(payload: EditionLookup):
 
 
 @router.post("/api/lookup/catalog")
-async def lookup_catalog(search: CatalogSearch):
+async def lookup_catalog(search: CatalogSearch, _user: CurrentUser = Depends(get_current_user)):
     """Search the catalog by serial (e.g. SLUS-00663) or by title."""
     catalog_db.init_catalog_db()
     results = catalog_db.search(

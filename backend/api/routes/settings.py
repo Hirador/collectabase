@@ -7,7 +7,11 @@ from pydantic import BaseModel, Field
 
 from ...database import get_app_meta_many, get_db, set_app_meta
 from ...version import APP_VERSION
-from ..security import admin_protection_status, require_admin_access
+from ..security import admin_protection_status
+from ...auth.deps import (
+    ActiveCollection, CurrentUser, active_collection, assert_collection_access,
+    get_current_user, require_super_admin, require_write,
+)
 
 router = APIRouter()
 
@@ -101,7 +105,8 @@ def _workflow_scheduler_status():
 
 
 @router.get("/api/settings/info")
-async def settings_info():
+async def settings_info(ac: ActiveCollection = Depends(active_collection)):
+    cid = ac.id
     client_id = _env_any("IGDB_CLIENT_ID")
     pricecharting_token = _env_any("PRICECHARTING_TOKEN", "PRICE_CHARTING_TOKEN")
     ebay_client_id = _env_any("EBAY_CLIENT_ID", "EBAY_APP_ID", "EBAY_APPID", "EBAY_CLIENTID")
@@ -132,35 +137,44 @@ async def settings_info():
         uploads_size_bytes = 0
 
     with get_db() as db:
-        total_items = db.execute("SELECT COUNT(*) FROM games WHERE is_wishlist = 0").fetchone()[0]
-        missing_covers = db.execute(
-            "SELECT COUNT(*) FROM games WHERE (cover_url IS NULL OR cover_url = '') AND is_wishlist = 0"
+        total_items = db.execute(
+            "SELECT COUNT(*) FROM games WHERE is_wishlist = 0 AND collection_id = ?", (cid,)
         ).fetchone()[0]
-        wishlist_count = db.execute("SELECT COUNT(*) FROM games WHERE is_wishlist = 1").fetchone()[0]
+        missing_covers = db.execute(
+            "SELECT COUNT(*) FROM games WHERE (cover_url IS NULL OR cover_url = '') AND is_wishlist = 0 AND collection_id = ?",
+            (cid,),
+        ).fetchone()[0]
+        wishlist_count = db.execute(
+            "SELECT COUNT(*) FROM games WHERE is_wishlist = 1 AND collection_id = ?", (cid,)
+        ).fetchone()[0]
         platforms_count = db.execute("SELECT COUNT(*) FROM platforms").fetchone()[0]
         local_covers = db.execute(
-            "SELECT COUNT(*) FROM games WHERE is_wishlist = 0 AND cover_url LIKE '/uploads/%'"
+            "SELECT COUNT(*) FROM games WHERE is_wishlist = 0 AND collection_id = ? AND cover_url LIKE '/uploads/%'",
+            (cid,),
         ).fetchone()[0]
         remote_covers = db.execute(
-            "SELECT COUNT(*) FROM games WHERE is_wishlist = 0 AND cover_url LIKE 'http%'"
+            "SELECT COUNT(*) FROM games WHERE is_wishlist = 0 AND collection_id = ? AND cover_url LIKE 'http%'",
+            (cid,),
         ).fetchone()[0]
 
         try:
             game_items = db.execute(
                 """
                 SELECT COUNT(*) FROM games
-                WHERE is_wishlist = 0
+                WHERE is_wishlist = 0 AND collection_id = ?
                   AND (item_type = 'game' OR item_type IS NULL OR item_type = '')
-                """
+                """,
+                (cid,),
             ).fetchone()[0]
             non_game_items = db.execute(
                 """
                 SELECT COUNT(*) FROM games
-                WHERE is_wishlist = 0
+                WHERE is_wishlist = 0 AND collection_id = ?
                   AND item_type IS NOT NULL
                   AND item_type != ''
                   AND item_type != 'game'
-                """
+                """,
+                (cid,),
             ).fetchone()[0]
         except Exception:
             game_items = total_items
@@ -248,7 +262,7 @@ async def settings_info():
 
 
 @router.post("/api/settings/secrets")
-async def update_secrets(payload: SecretsUpdate, _admin: None = Depends(require_admin_access)):
+async def update_secrets(payload: SecretsUpdate, _admin: CurrentUser = Depends(require_super_admin)):
     updated = []
     values = {
         "igdb_client_id": payload.igdb_client_id,
@@ -275,23 +289,27 @@ async def update_secrets(payload: SecretsUpdate, _admin: None = Depends(require_
     return {"ok": True, "updated": updated}
 
 @router.post("/api/settings/scheduler")
-async def update_scheduler_settings(payload: SchedulerUpdate, _admin: None = Depends(require_admin_access)):
+async def update_scheduler_settings(payload: SchedulerUpdate, _admin: CurrentUser = Depends(require_super_admin)):
     set_app_meta("apscheduler_interval", str(payload.interval))
     from ...scheduler import update_scheduler
     update_scheduler()
     return {"ok": True, "interval": payload.interval}
 
 @router.post("/api/settings/clear-covers")
-async def clear_all_covers(_admin: None = Depends(require_admin_access)):
+async def clear_all_covers(ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        db.execute("UPDATE games SET cover_url = NULL")
+        db.execute("UPDATE games SET cover_url = NULL WHERE collection_id = ?", (ac.id,))
         db.commit()
     return {"message": "All covers cleared"}
 
 
 @router.delete("/api/database/clear")
-async def clear_database(_admin: None = Depends(require_admin_access)):
+async def clear_database(user: CurrentUser = Depends(get_current_user),
+                         ac: ActiveCollection = Depends(active_collection)):
+    # Wipes every item in the ACTIVE collection only; owner-level action.
+    assert_collection_access(user, ac.id, "owner")
     with get_db() as db:
-        db.execute("DELETE FROM games")
+        db.execute("DELETE FROM games WHERE collection_id = ?", (ac.id,))
         db.commit()
-    return {"message": "Database cleared successfully"}
+    return {"message": "Collection cleared successfully"}

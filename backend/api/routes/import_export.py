@@ -3,10 +3,11 @@ import io
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ...database import get_db
+from ...auth.deps import ActiveCollection, active_collection, require_write
 
 router = APIRouter()
 
@@ -16,7 +17,9 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 
 @router.post("/api/upload/cover")
-async def upload_cover(file: UploadFile = File(...)):
+async def upload_cover(file: UploadFile = File(...),
+                       ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     import mimetypes
     import uuid
 
@@ -47,7 +50,9 @@ async def upload_cover(file: UploadFile = File(...)):
 
 
 @router.post("/api/import/csv")
-async def import_csv(file: UploadFile = File(...)):
+async def import_csv(file: UploadFile = File(...),
+                     ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail={"code": "bad_request", "message": "File must be a CSV"})
 
@@ -135,8 +140,8 @@ async def import_csv(file: UploadFile = File(...)):
                         item_type = "game"
 
                 dup = db.execute(
-                    "SELECT id FROM games WHERE LOWER(title) = LOWER(?) AND platform_id = ?",
-                    (title_val, platform_id),
+                    "SELECT id FROM games WHERE LOWER(title) = LOWER(?) AND platform_id = ? AND collection_id = ?",
+                    (title_val, platform_id, ac.id),
                 ).fetchone()
                 if dup:
                     skipped_duplicates += 1
@@ -145,12 +150,13 @@ async def import_csv(file: UploadFile = File(...)):
                 db.execute(
                     """
                     INSERT INTO games (
-                        title, platform_id, item_type, barcode, region, condition,
+                        collection_id, title, platform_id, item_type, barcode, region, condition,
                         completeness, location, purchase_price, current_value,
                         notes, is_wishlist
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        ac.id,
                         title_val,
                         platform_id,
                         item_type,
@@ -176,7 +182,7 @@ async def import_csv(file: UploadFile = File(...)):
 
 
 @router.get("/api/export/csv")
-async def export_csv():
+async def export_csv(ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
         cursor = db.execute(
             """
@@ -186,8 +192,10 @@ async def export_csv():
                    g.genre, g.is_wishlist
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
+            WHERE g.collection_id = ?
             ORDER BY p.name, g.title
-            """
+            """,
+            (ac.id,),
         )
         rows = cursor.fetchall()
 

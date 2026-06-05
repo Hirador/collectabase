@@ -81,19 +81,29 @@ async def snapshot_collection_value():
     logger.info(f"[{datetime.now().isoformat()}] Starting snapshot_collection_value")
     try:
         with get_db() as db:
-            total_value = db.execute("SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0").fetchone()[0]
-            game_value = db.execute("SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0 AND item_type = 'game'").fetchone()[0]
-            hardware_value = db.execute("SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0 AND item_type != 'game'").fetchone()[0]
-
-            db.execute(
-                """
-                INSERT INTO value_history (recorded_at, total_value, game_value, hardware_value)
-                VALUES (CURRENT_DATE, ?, ?, ?)
-                """,
-                (total_value, game_value, hardware_value)
-            )
+            collection_ids = [r["id"] for r in db.execute("SELECT id FROM collections").fetchall()]
+            for cid in collection_ids:
+                total_value = db.execute(
+                    "SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0 AND collection_id = ?",
+                    (cid,),
+                ).fetchone()[0]
+                game_value = db.execute(
+                    "SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0 AND item_type = 'game' AND collection_id = ?",
+                    (cid,),
+                ).fetchone()[0]
+                hardware_value = db.execute(
+                    "SELECT COALESCE(SUM(COALESCE(current_value, 0) * quantity), 0) FROM games WHERE is_wishlist = 0 AND item_type != 'game' AND collection_id = ?",
+                    (cid,),
+                ).fetchone()[0]
+                db.execute(
+                    """
+                    INSERT INTO value_history (collection_id, recorded_at, total_value, game_value, hardware_value)
+                    VALUES (?, CURRENT_DATE, ?, ?, ?)
+                    """,
+                    (cid, total_value, game_value, hardware_value),
+                )
             db.commit()
-        logger.info(f"Successfully recorded collection snapshot: Total {total_value:.2f} (Games: {game_value:.2f}, Hardware: {hardware_value:.2f})")
+        logger.info(f"Successfully recorded value snapshot for {len(collection_ids)} collection(s)")
     except Exception as e:
         logger.error(f"Error in snapshot_collection_value: {e}", exc_info=True)
 
