@@ -28,6 +28,12 @@
         <router-link to="/wishlist" title="Wishlist">
           <span class="nav-icon">⭐</span> <span v-show="!collapsed">Wishlist</span>
         </router-link>
+        <router-link to="/account" title="Account">
+          <span class="nav-icon">👤</span> <span v-show="!collapsed">Account</span>
+        </router-link>
+        <router-link v-if="auth.isSuperAdmin || ownsAnyCollection" to="/admin" title="Users & Sharing">
+          <span class="nav-icon">👥</span> <span v-show="!collapsed">Users &amp; Sharing</span>
+        </router-link>
         <router-link to="/more" title="More Options">
           <span class="nav-icon">⚙️</span> <span v-show="!collapsed">More</span>
         </router-link>
@@ -130,6 +136,7 @@ const { user, collections, activeCollectionId } = storeToRefs(auth)
 
 // On /login (and any future public route) we render only the page, no app chrome.
 const isPublic = computed(() => !!route.meta.public)
+const ownsAnyCollection = computed(() => collections.value.some((c) => c.is_owner || c.role === 'owner'))
 
 onMounted(() => {
   const saved = localStorage.getItem('collectabase_sidebar_collapsed')

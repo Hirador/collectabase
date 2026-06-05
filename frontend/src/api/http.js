@@ -133,6 +133,16 @@ export async function apiPut(url, body) {
   return { ok: res.ok, status: res.status, data }
 }
 
+export async function apiPatch(url, body) {
+  const res = await coreFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...withSessionHeaders('PATCH') },
+    body: JSON.stringify(body),
+  })
+  const data = await parseJsonSafe(res)
+  return { ok: res.ok, status: res.status, data }
+}
+
 export async function apiPostForm(url, formData) {
   const res = await coreFetch(url, { method: 'POST', headers: withSessionHeaders('POST'), body: formData })
   const data = await parseJsonSafe(res)

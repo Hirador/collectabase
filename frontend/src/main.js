@@ -17,10 +17,14 @@ import PriceBrowser from './views/PriceBrowser.vue'
 import MoreMenu from './views/MoreMenu.vue'
 import LotsView from './views/LotsView.vue'
 import Login from './views/Login.vue'
+import Account from './views/Account.vue'
+import Admin from './views/Admin.vue'
 import { useAuthStore } from './stores/auth'
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
+  { path: '/account', component: Account },
+  { path: '/admin', component: Admin },
   { path: '/', component: GamesList },
   { path: '/game/:id', component: GameDetail, props: true },
   { path: '/add', component: AddGame },
