@@ -104,14 +104,6 @@
         <span>Stats</span>
       </router-link>
 
-      <router-link to="/prices" active-class="nav-active">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
-          <line x1="7" y1="7" x2="7.01" y2="7"/>
-        </svg>
-        <span>Prices</span>
-      </router-link>
-
       <router-link to="/wishlist" active-class="nav-active">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
@@ -119,22 +111,37 @@
         <span>Wishlist</span>
       </router-link>
 
-      <router-link v-if="auth.isSuperAdmin" to="/more" active-class="nav-active">
+      <router-link to="/lots" active-class="nav-active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+          <line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+        <span>Lots</span>
+      </router-link>
+
+      <button type="button" class="mobile-menu-btn" :class="{ 'nav-active': mobileMenuOpen }" @click="mobileMenuOpen = true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="1.5"/>
           <circle cx="19" cy="12" r="1.5"/>
           <circle cx="5" cy="12" r="1.5"/>
         </svg>
-        <span>More</span>
-      </router-link>
-      <router-link v-else to="/account" active-class="nav-active">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="8" r="4"/>
-          <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>
-        </svg>
-        <span>Account</span>
-      </router-link>
+        <span>Menu</span>
+      </button>
     </nav>
+
+    <!-- Mobile overflow sheet (secondary destinations) -->
+    <div v-if="!isPublic && mobileMenuOpen" class="mobile-sheet-backdrop" @click="mobileMenuOpen = false">
+      <div class="mobile-sheet" @click.stop>
+        <div class="sheet-handle"></div>
+        <router-link to="/prices" class="sheet-item" @click="mobileMenuOpen = false">💰 Prices</router-link>
+        <router-link to="/import" class="sheet-item" @click="mobileMenuOpen = false">🧾 Import / Export</router-link>
+        <router-link to="/collections" class="sheet-item" @click="mobileMenuOpen = false">🗂️ Manage collections</router-link>
+        <router-link to="/account" class="sheet-item" @click="mobileMenuOpen = false">👤 Account</router-link>
+        <router-link v-if="auth.isSuperAdmin" to="/more" class="sheet-item" @click="mobileMenuOpen = false">⚙️ More (admin)</router-link>
+        <button class="sheet-item danger" @click="logout">🚪 Log out</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -147,6 +154,7 @@ import { useAuthStore } from './stores/auth'
 
 const collapsed = ref(false)
 const userMenuOpen = ref(false)
+const mobileMenuOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -495,7 +503,8 @@ async function logout() {
     box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.2);
   }
 
-  .mobile-nav a {
+  .mobile-nav a,
+  .mobile-nav .mobile-menu-btn {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -508,16 +517,22 @@ async function logout() {
     gap: 0.25rem;
     transition: color 0.2s;
     -webkit-tap-highlight-color: transparent;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
   }
 
-  .mobile-nav a svg {
+  .mobile-nav a svg,
+  .mobile-nav .mobile-menu-btn svg {
     width: 24px;
     height: 24px;
     stroke-width: 2.2;
     transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
-  .mobile-nav a.nav-active {
+  .mobile-nav a.nav-active,
+  .mobile-nav .mobile-menu-btn.nav-active {
     color: var(--primary);
   }
 
@@ -525,4 +540,46 @@ async function logout() {
     transform: scale(1.15);
   }
 }
+
+/* Mobile overflow sheet — rendered only when opened from the mobile menu button */
+.mobile-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+}
+.mobile-sheet {
+  width: 100%;
+  background: var(--bg-light);
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  border-top: 1px solid var(--glass-border);
+  padding: 0.5rem 0.75rem calc(1rem + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.4);
+}
+.sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--glass-border);
+  margin: 0.5rem auto 0.75rem;
+}
+.sheet-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font-family: inherit;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 1rem;
+  padding: 0.85rem 0.75rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+.sheet-item:hover { background: rgba(255, 255, 255, 0.06); }
+.sheet-item.danger { color: #ff6b6b; }
 </style>
