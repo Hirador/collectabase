@@ -126,3 +126,41 @@ def assert_collection_access(user: CurrentUser, collection_id: int, min_role: st
     if _ROLE_RANK.get(role, 0) < _ROLE_RANK.get(min_role, 99):
         raise _forbidden(f"This action requires '{min_role}' access.")
     return role
+
+
+# --- active collection (the workspace a request operates within) ----------
+
+ACTIVE_COLLECTION_HEADER = "x-collection-id"
+
+
+@dataclass
+class ActiveCollection:
+    id: int
+    role: str  # the requesting user's role in this collection
+
+
+async def active_collection(
+    request: Request, user: CurrentUser = Depends(get_current_user),
+) -> ActiveCollection:
+    """Resolve which collection this request targets (from the X-Collection-Id
+    header, else the user's lowest-id accessible collection) and verify access."""
+    raw = request.headers.get(ACTIVE_COLLECTION_HEADER)
+    collection_id: Optional[int] = None
+    if raw:
+        try:
+            collection_id = int(raw)
+        except ValueError:
+            collection_id = None
+    if collection_id is None:
+        ids = accessible_collection_ids(user)
+        if not ids:
+            raise _forbidden("You don't have access to any collection yet.")
+        collection_id = min(ids)
+    role = assert_collection_access(user, collection_id, "viewer")
+    return ActiveCollection(id=collection_id, role=role)
+
+
+def require_write(active: ActiveCollection) -> None:
+    """Raise unless the user can write (editor or owner) in the active collection."""
+    if _ROLE_RANK.get(active.role, 0) < _ROLE_RANK["editor"]:
+        raise _forbidden("This action requires editor access to the collection.")

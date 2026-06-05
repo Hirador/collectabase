@@ -1,14 +1,27 @@
 import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..errors import conflict, not_found
 from ..schemas import CopyCreate, CopyUpdate, GameCreate, GameUpdate, PlatformCreate
 from ...database import dict_from_row, get_db
+from ...auth.deps import (
+    ActiveCollection, CurrentUser, active_collection, get_current_user, require_write,
+)
 from ...services.lookup_service import cache_remote_cover
 
 router = APIRouter()
+
+
+def _game_in_collection(db, game_id: int, collection_id: int) -> bool:
+    """True if the game exists and belongs to the active collection. Used to
+    gate game-scoped sub-resources (copies, images) so they can't be reached
+    cross-collection by guessing ids."""
+    row = db.execute(
+        "SELECT 1 FROM games WHERE id = ? AND collection_id = ?", (game_id, collection_id)
+    ).fetchone()
+    return row is not None
 
 
 @router.get("/api/games")
@@ -16,6 +29,7 @@ async def list_games(
     platform: Optional[int] = None,
     wishlist: Optional[bool] = None,
     search: Optional[str] = None,
+    ac: ActiveCollection = Depends(active_collection),
 ):
     with get_db() as db:
         query = """
@@ -24,9 +38,9 @@ async def list_games(
               (SELECT SUM(gc.current_value) FROM game_copies gc WHERE gc.game_id = g.id AND gc.current_value IS NOT NULL) as copies_total_value
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
-            WHERE 1=1
+            WHERE g.collection_id = ?
         """
-        params = []
+        params = [ac.id]
 
         if platform:
             query += " AND g.platform_id = ?"
@@ -47,12 +61,14 @@ async def list_games(
 
 
 @router.post("/api/games")
-async def create_game(game: GameCreate, force: bool = False):
+async def create_game(game: GameCreate, force: bool = False,
+                      ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     if not force:
         with get_db() as db:
             existing = db.execute(
-                "SELECT id FROM games WHERE LOWER(title) = LOWER(?) AND platform_id = ?",
-                (game.title, game.platform_id),
+                "SELECT id FROM games WHERE LOWER(title) = LOWER(?) AND platform_id = ? AND collection_id = ?",
+                (game.title, game.platform_id, ac.id),
             ).fetchone()
             if existing:
                 raise conflict("Game already exists", {"existing_id": existing[0]})
@@ -64,6 +80,7 @@ async def create_game(game: GameCreate, force: bool = False):
         cursor = db.execute(
             '''
             INSERT INTO games (
+                collection_id,
                 title, platform_id, item_type, quantity, barcode, igdb_id, comicvine_id, hobbydb_id, mfc_id, release_date,
                 publisher, developer, genre, description, cover_url,
                 region, serial, disc_revision, languages, edition, catalog_source,
@@ -71,9 +88,10 @@ async def create_game(game: GameCreate, force: bool = False):
                 purchase_date, purchase_price, current_value, notes,
                 is_wishlist, wishlist_max_price,
                 character_name, series_name, scale, funko_number, vinyl_format
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
+                ac.id,
                 game.title,
                 game.platform_id,
                 game.item_type,
@@ -132,16 +150,16 @@ async def create_game(game: GameCreate, force: bool = False):
 
 
 @router.get("/api/games/{game_id}")
-async def get_game(game_id: int):
+async def get_game(game_id: int, ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
         cursor = db.execute(
             """
             SELECT g.*, p.name as platform_name
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
-            WHERE g.id = ?
+            WHERE g.id = ? AND g.collection_id = ?
             """,
-            (game_id,),
+            (game_id, ac.id),
         )
         game = dict_from_row(cursor.fetchone())
         if not game:
@@ -155,9 +173,13 @@ async def get_game(game_id: int):
 
 
 @router.put("/api/games/{game_id}")
-async def update_game(game_id: int, game: GameUpdate):
+async def update_game(game_id: int, game: GameUpdate,
+                      ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        existing = db.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
+        existing = db.execute(
+            "SELECT * FROM games WHERE id = ? AND collection_id = ?", (game_id, ac.id)
+        ).fetchone()
         if not existing:
             raise not_found("Game not found")
 
@@ -290,9 +312,12 @@ async def update_game(game_id: int, game: GameUpdate):
 
 
 @router.delete("/api/games/{game_id}")
-async def delete_game(game_id: int):
+async def delete_game(game_id: int, ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        existing = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
+        existing = db.execute(
+            "SELECT id FROM games WHERE id = ? AND collection_id = ?", (game_id, ac.id)
+        ).fetchone()
         if not existing:
             raise not_found("Game not found")
         db.execute("DELETE FROM games WHERE id = ?", (game_id,))
@@ -301,8 +326,10 @@ async def delete_game(game_id: int):
 
 
 @router.get("/api/games/{game_id}/images")
-async def get_game_images(game_id: int):
+async def get_game_images(game_id: int, ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise not_found("Game not found")
         cursor = db.execute(
             "SELECT id, image_url, is_primary, sort_order FROM item_images WHERE game_id = ? ORDER BY sort_order ASC, id ASC",
             (game_id,)
@@ -311,14 +338,15 @@ async def get_game_images(game_id: int):
 
 
 @router.post("/api/games/{game_id}/images")
-async def add_game_image(game_id: int, payload: dict):
+async def add_game_image(game_id: int, payload: dict,
+                         ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     url = payload.get("image_url")
     if not url:
         raise conflict("image_url is required")
 
     with get_db() as db:
-        existing = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
-        if not existing:
+        if not _game_in_collection(db, game_id, ac.id):
             raise not_found("Game not found")
 
         # if it's the first image, make it primary
@@ -339,8 +367,12 @@ async def add_game_image(game_id: int, payload: dict):
 
 
 @router.post("/api/games/{game_id}/images/{image_id}/primary")
-async def set_primary_image(game_id: int, image_id: int):
+async def set_primary_image(game_id: int, image_id: int,
+                            ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise not_found("Game not found")
         img = db.execute("SELECT image_url FROM item_images WHERE id = ? AND game_id = ?", (image_id, game_id)).fetchone()
         if not img:
             raise not_found("Image not found")
@@ -353,8 +385,12 @@ async def set_primary_image(game_id: int, image_id: int):
 
 
 @router.delete("/api/games/{game_id}/images/{image_id}")
-async def delete_game_image(game_id: int, image_id: int):
+async def delete_game_image(game_id: int, image_id: int,
+                            ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise not_found("Game not found")
         img = db.execute("SELECT is_primary FROM item_images WHERE id = ? AND game_id = ?", (image_id, game_id)).fetchone()
         if not img:
             raise not_found("Image not found")
@@ -375,10 +411,9 @@ async def delete_game_image(game_id: int, image_id: int):
 
 
 @router.get("/api/games/{game_id}/copies")
-async def list_copies(game_id: int):
+async def list_copies(game_id: int, ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
-        existing = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
-        if not existing:
+        if not _game_in_collection(db, game_id, ac.id):
             raise not_found("Game not found")
         cursor = db.execute(
             "SELECT * FROM game_copies WHERE game_id = ? ORDER BY id",
@@ -388,10 +423,11 @@ async def list_copies(game_id: int):
 
 
 @router.post("/api/games/{game_id}/copies")
-async def add_copy(game_id: int, copy: CopyCreate):
+async def add_copy(game_id: int, copy: CopyCreate,
+                   ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
-        existing = db.execute("SELECT id FROM games WHERE id = ?", (game_id,)).fetchone()
-        if not existing:
+        if not _game_in_collection(db, game_id, ac.id):
             raise not_found("Game not found")
         cursor = db.execute(
             """INSERT INTO game_copies
@@ -424,8 +460,12 @@ async def add_copy(game_id: int, copy: CopyCreate):
 
 
 @router.put("/api/games/{game_id}/copies/{copy_id}")
-async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
+async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate,
+                      ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise not_found("Game not found")
         existing = db.execute(
             "SELECT * FROM game_copies WHERE id = ? AND game_id = ?", (copy_id, game_id)
         ).fetchone()
@@ -469,8 +509,12 @@ async def update_copy(game_id: int, copy_id: int, copy: CopyUpdate):
 
 
 @router.delete("/api/games/{game_id}/copies/{copy_id}")
-async def delete_copy(game_id: int, copy_id: int):
+async def delete_copy(game_id: int, copy_id: int,
+                      ac: ActiveCollection = Depends(active_collection)):
+    require_write(ac)
     with get_db() as db:
+        if not _game_in_collection(db, game_id, ac.id):
+            raise not_found("Game not found")
         existing = db.execute(
             "SELECT id FROM game_copies WHERE id = ? AND game_id = ?", (copy_id, game_id)
         ).fetchone()
@@ -489,14 +533,15 @@ async def delete_copy(game_id: int, copy_id: int):
 
 
 @router.get("/api/platforms")
-async def list_platforms():
+async def list_platforms(_user: CurrentUser = Depends(get_current_user)):
     with get_db() as db:
         cursor = db.execute("SELECT * FROM platforms ORDER BY name")
         return [dict_from_row(row) for row in cursor.fetchall()]
 
 
 @router.post("/api/platforms")
-async def create_platform(platform: PlatformCreate):
+async def create_platform(platform: PlatformCreate,
+                          _user: CurrentUser = Depends(get_current_user)):
     with get_db() as db:
         try:
             cursor = db.execute(
