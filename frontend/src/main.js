@@ -18,13 +18,14 @@ import MoreMenu from './views/MoreMenu.vue'
 import LotsView from './views/LotsView.vue'
 import Login from './views/Login.vue'
 import Account from './views/Account.vue'
-import Admin from './views/Admin.vue'
+import Collections from './views/Collections.vue'
+import Users from './views/Users.vue'
 import { useAuthStore } from './stores/auth'
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
   { path: '/account', component: Account },
-  { path: '/admin', component: Admin },
+  { path: '/collections', component: Collections },
   { path: '/', component: GamesList },
   { path: '/game/:id', component: GameDetail, props: true },
   { path: '/add', component: AddGame },
@@ -33,9 +34,11 @@ const routes = [
   { path: '/import', component: Import },
   { path: '/stats', component: Stats },
   { path: '/prices', component: PriceBrowser },
-  { path: '/settings', component: Settings },
+  // Super-admin-only areas
+  { path: '/settings', component: Settings, meta: { superAdmin: true } },
+  { path: '/users', component: Users, meta: { superAdmin: true } },
+  { path: '/more', component: MoreMenu, meta: { superAdmin: true } },
   { path: '/lots', component: LotsView },
-  { path: '/more', component: MoreMenu },
 ]
 
 const router = createRouter({
@@ -62,6 +65,15 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} }
   }
   if (to.path === '/login' && auth.isAuthed) {
+    return '/'
+  }
+  // Forced MFA enrollment: until enrolled, the only place a required user can go
+  // is their account page (to set it up) — everything else bounces there.
+  if (auth.isAuthed && auth.mustEnrollMfa && to.path !== '/account') {
+    return '/account'
+  }
+  // Super-admin-only areas.
+  if (to.meta.superAdmin && !auth.isSuperAdmin) {
     return '/'
   }
   return true

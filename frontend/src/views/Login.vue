@@ -67,7 +67,8 @@ onMounted(async () => {
 
 function go() {
   const dest = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-  router.replace(dest)
+  // Full reload (not SPA nav) so no view state from a previous user can linger.
+  window.location.assign(dest)
 }
 
 async function doBootstrap() {

@@ -15,12 +15,14 @@ class CreateUserRequest(BaseModel):
     display_name: str | None = None
     password: str = Field(min_length=8)
     is_super_admin: bool = False
+    mfa_required: bool = False
 
 
 class UpdateUserRequest(BaseModel):
     display_name: str | None = None
     is_active: bool | None = None
     is_super_admin: bool | None = None
+    mfa_required: bool | None = None
     new_password: str | None = Field(default=None, min_length=8)
 
 
@@ -32,6 +34,7 @@ def _user_row(row) -> dict:
         "is_super_admin": bool(row["is_super_admin"]),
         "is_active": bool(row["is_active"]),
         "mfa_enabled": bool(row["mfa_enabled"]),
+        "mfa_required": bool(row["is_super_admin"] or row["mfa_required"]),
         "last_login_at": row["last_login_at"],
         "created_at": row["created_at"],
     }
@@ -68,10 +71,11 @@ async def create_user(payload: CreateUserRequest, _admin: CurrentUser = Depends(
             raise HTTPException(status_code=409, detail={
                 "code": "email_taken", "message": "A user with that email already exists."})
         cur = db.execute(
-            "INSERT INTO users (email, display_name, password_hash, is_super_admin, is_active) "
-            "VALUES (?, ?, ?, ?, 1)",
+            "INSERT INTO users (email, display_name, password_hash, is_super_admin, is_active, mfa_required) "
+            "VALUES (?, ?, ?, ?, 1, ?)",
             (email, (payload.display_name or "").strip() or None,
-             hash_password(payload.password), 1 if payload.is_super_admin else 0),
+             hash_password(payload.password), 1 if payload.is_super_admin else 0,
+             1 if payload.mfa_required else 0),
         )
         db.commit()
         new_id = cur.lastrowid
@@ -103,6 +107,8 @@ async def update_user(user_id: int, payload: UpdateUserRequest,
             sets.append("is_active = ?"); params.append(1 if payload.is_active else 0)
         if payload.is_super_admin is not None:
             sets.append("is_super_admin = ?"); params.append(1 if payload.is_super_admin else 0)
+        if payload.mfa_required is not None:
+            sets.append("mfa_required = ?"); params.append(1 if payload.mfa_required else 0)
         if payload.new_password is not None:
             sets.append("password_hash = ?"); params.append(hash_password(payload.new_password))
             # Force re-login everywhere when an admin resets a password.

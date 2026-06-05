@@ -1,36 +1,7 @@
 <template>
   <div class="container">
     <h1 class="mb-3">More</h1>
-    <p class="more-intro">Collection tools and admin actions.</p>
-
-    <div class="more-section">
-      <h2 class="more-section-title">Collection</h2>
-      <div class="more-grid">
-        <router-link to="/add" class="more-card">
-          <div class="more-icon">➕</div>
-          <div class="more-copy">
-            <div class="more-title">Add Game</div>
-            <div class="more-sub">Create a new entry</div>
-          </div>
-        </router-link>
-
-        <router-link to="/wishlist" class="more-card">
-          <div class="more-icon">⭐</div>
-          <div class="more-copy">
-            <div class="more-title">Wishlist</div>
-            <div class="more-sub">Track wanted games</div>
-          </div>
-        </router-link>
-
-        <router-link to="/lots" class="more-card">
-          <div class="more-icon">📦</div>
-          <div class="more-copy">
-            <div class="more-title">Lots & Resale</div>
-            <div class="more-sub">Bundle cost basis and sales</div>
-          </div>
-        </router-link>
-      </div>
-    </div>
+    <p class="more-intro">Admin tools — users, the shared game database, and system settings.</p>
 
     <div class="more-section">
       <h2 class="more-section-title">Game Database</h2>
@@ -73,13 +44,13 @@
     </div>
 
     <div class="more-section">
-      <h2 class="more-section-title">Data & Admin</h2>
+      <h2 class="more-section-title">Administration</h2>
       <div class="more-grid">
-        <router-link to="/import" class="more-card">
-          <div class="more-icon">🧾</div>
+        <router-link to="/users" class="more-card">
+          <div class="more-icon">👥</div>
           <div class="more-copy">
-            <div class="more-title">Import / Export</div>
-            <div class="more-sub">CSV and CLZ tools</div>
+            <div class="more-title">Users</div>
+            <div class="more-sub">Create accounts, roles, enforce MFA</div>
           </div>
         </router-link>
 
@@ -87,7 +58,7 @@
           <div class="more-icon">⚙️</div>
           <div class="more-copy">
             <div class="more-title">Settings</div>
-            <div class="more-sub">System, jobs, cleanup</div>
+            <div class="more-sub">API keys, system, jobs, cleanup</div>
           </div>
         </router-link>
       </div>

@@ -207,18 +207,23 @@ async def me(user: CurrentUser = Depends(get_current_user)):
             "WHERE m.user_id = ? ORDER BY c.id",
             (user.id,),
         ).fetchall()
-        mfa = db.execute("SELECT mfa_enabled FROM users WHERE id = ?", (user.id,)).fetchone()
+        mfa = db.execute(
+            "SELECT mfa_enabled, mfa_required FROM users WHERE id = ?", (user.id,)
+        ).fetchone()
     collections = [
         {"id": r["id"], "name": r["name"], "is_personal": bool(r["is_personal"]),
          "is_owner": r["owner_user_id"] == user.id, "role": r["role"]}
         for r in rows
     ]
+    # Super admins are always required to use MFA; regular users only if flagged.
+    mfa_required = bool(user.is_super_admin or (mfa and mfa["mfa_required"]))
     return {
         "id": user.id,
         "email": user.email,
         "display_name": user.display_name,
         "is_super_admin": user.is_super_admin,
         "mfa_enabled": bool(mfa["mfa_enabled"]) if mfa else False,
+        "mfa_required": mfa_required,
         "collections": collections,
     }
 

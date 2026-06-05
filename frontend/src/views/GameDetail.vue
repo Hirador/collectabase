@@ -1228,6 +1228,8 @@ async function deleteGame() {
     const res = await gamesApi.remove(route.params.id)
     if (res.ok) {
       notifySuccess('Game deleted.')
+      // Drop it from the cached store so the list doesn't show it until reload.
+      useGameStore().removeGame(Number(route.params.id))
       router.push('/')
     } else {
       const detail = res.data?.detail

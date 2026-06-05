@@ -28,13 +28,13 @@
         <router-link to="/wishlist" title="Wishlist">
           <span class="nav-icon">⭐</span> <span v-show="!collapsed">Wishlist</span>
         </router-link>
-        <router-link to="/account" title="Account">
-          <span class="nav-icon">👤</span> <span v-show="!collapsed">Account</span>
+        <router-link to="/lots" title="Lots & Resale">
+          <span class="nav-icon">📦</span> <span v-show="!collapsed">Lots</span>
         </router-link>
-        <router-link v-if="auth.isSuperAdmin || ownsAnyCollection" to="/admin" title="Users & Sharing">
-          <span class="nav-icon">👥</span> <span v-show="!collapsed">Users &amp; Sharing</span>
+        <router-link to="/import" title="Import / Export">
+          <span class="nav-icon">🧾</span> <span v-show="!collapsed">Import / Export</span>
         </router-link>
-        <router-link to="/more" title="More Options">
+        <router-link v-if="auth.isSuperAdmin" to="/more" title="More Options">
           <span class="nav-icon">⚙️</span> <span v-show="!collapsed">More</span>
         </router-link>
       </nav>
@@ -45,14 +45,24 @@
           <select :value="activeCollectionId" @change="onCollectionChange">
             <option v-for="c in collections" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
+          <router-link to="/collections" class="manage-collections-link">Manage collections…</router-link>
         </div>
         <router-link to="/add" class="btn btn-primary add-btn" active-class="btn-active" title="Add Item">
           <span v-if="collapsed" style="font-size: 1.25rem;">+</span>
           <span v-else>+ Add Item</span>
         </router-link>
-        <div v-if="!collapsed && user" class="user-row">
-          <span class="user-email" :title="user.email">{{ user.display_name || user.email }}</span>
-          <button class="logout-btn" @click="logout" title="Log out">Log out</button>
+
+        <!-- Username menu: Manage account + Log out -->
+        <div v-if="user" class="user-menu" :class="{ collapsed }">
+          <button class="user-trigger" @click="userMenuOpen = !userMenuOpen" :title="user.email">
+            <span class="user-avatar">{{ (user.display_name || user.email || '?').charAt(0).toUpperCase() }}</span>
+            <span v-show="!collapsed" class="user-trigger-name">{{ user.display_name || user.email }}</span>
+            <span v-show="!collapsed" class="user-caret">⌄</span>
+          </button>
+          <div v-if="userMenuOpen" class="user-dropdown">
+            <router-link to="/account" class="user-dropdown-item" @click="userMenuOpen = false">⚙️ Manage account</router-link>
+            <button class="user-dropdown-item" @click="logout">🚪 Log out</button>
+          </div>
         </div>
       </div>
     </aside>
@@ -109,13 +119,20 @@
         <span>Wishlist</span>
       </router-link>
 
-      <router-link to="/more" active-class="nav-active">
+      <router-link v-if="auth.isSuperAdmin" to="/more" active-class="nav-active">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="1.5"/>
           <circle cx="19" cy="12" r="1.5"/>
           <circle cx="5" cy="12" r="1.5"/>
         </svg>
         <span>More</span>
+      </router-link>
+      <router-link v-else to="/account" active-class="nav-active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="8" r="4"/>
+          <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>
+        </svg>
+        <span>Account</span>
       </router-link>
     </nav>
   </div>
@@ -129,6 +146,7 @@ import NotificationStack from './components/NotificationStack.vue'
 import { useAuthStore } from './stores/auth'
 
 const collapsed = ref(false)
+const userMenuOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -136,7 +154,6 @@ const { user, collections, activeCollectionId } = storeToRefs(auth)
 
 // On /login (and any future public route) we render only the page, no app chrome.
 const isPublic = computed(() => !!route.meta.public)
-const ownsAnyCollection = computed(() => collections.value.some((c) => c.is_owner || c.role === 'owner'))
 
 onMounted(() => {
   const saved = localStorage.getItem('collectabase_sidebar_collapsed')
@@ -347,6 +364,40 @@ async function logout() {
   cursor: pointer;
 }
 .logout-btn:hover { color: var(--text); }
+
+.manage-collections-link {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.manage-collections-link:hover { color: var(--primary); }
+
+.user-menu { position: relative; margin-top: 0.9rem; padding-top: 0.9rem; border-top: 1px solid var(--glass-border); }
+.user-trigger {
+  display: flex; align-items: center; gap: 0.55rem; width: 100%;
+  background: transparent; border: 1px solid var(--glass-border); color: var(--text);
+  padding: 0.5rem 0.6rem; border-radius: 0.6rem; cursor: pointer;
+}
+.user-menu.collapsed .user-trigger { justify-content: center; padding: 0.5rem 0; }
+.user-avatar {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--primary, #8b5cf6); color: #fff; font-weight: 700; font-size: 0.85rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.user-trigger-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
+.user-caret { color: var(--text-muted); }
+.user-dropdown {
+  position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
+  background: var(--bg-light); border: 1px solid var(--glass-border);
+  border-radius: 0.6rem; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.35); z-index: 200;
+}
+.user-dropdown-item {
+  display: block; width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--text); padding: 0.6rem 0.8rem; font-size: 0.85rem; cursor: pointer; text-decoration: none;
+}
+.user-dropdown-item:hover { background: rgba(255,255,255,0.06); }
 .mobile-header-actions { display: flex; align-items: center; gap: 0.5rem; }
 .mobile-collection { width: auto; max-width: 40vw; }
 

@@ -5,7 +5,7 @@ const ROLE_RANK = { viewer: 1, editor: 2, owner: 3 }
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null,            // { id, email, display_name, is_super_admin, mfa_enabled }
+    user: null,            // { id, email, display_name, is_super_admin, mfa_enabled, mfa_required }
     collections: [],       // [{ id, name, role, is_owner, is_personal }]
     activeCollectionId: null,
     ready: false,          // true once the initial /me probe has completed
@@ -14,6 +14,8 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthed: (s) => !!s.user,
     isSuperAdmin: (s) => !!s.user?.is_super_admin,
+    // True when the user must enroll TOTP before they can use the app.
+    mustEnrollMfa: (s) => !!(s.user && s.user.mfa_required && !s.user.mfa_enabled),
     activeCollection: (s) => s.collections.find((c) => c.id === s.activeCollectionId) || null,
     activeRole() {
       if (this.isSuperAdmin) return 'owner'
@@ -57,6 +59,7 @@ export const useAuthStore = defineStore('auth', {
           display_name: data.display_name,
           is_super_admin: data.is_super_admin,
           mfa_enabled: data.mfa_enabled,
+          mfa_required: data.mfa_required,
         }
         this.collections = data.collections || []
         this._syncActiveCollection()
@@ -95,6 +98,8 @@ export const useAuthStore = defineStore('auth', {
       this.user = null
       this.collections = []
       this.activeCollectionId = null
+      // Clear the persisted active collection so the next user doesn't inherit it.
+      setActiveCollectionId('')
     },
 
     // Called when http.js detects an unrecoverable 401.

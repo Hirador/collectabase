@@ -3,6 +3,10 @@
     <h1>Account</h1>
     <p class="subtitle">{{ auth.user?.email }}</p>
 
+    <div v-if="auth.mustEnrollMfa" class="enforce-banner">
+      ⚠️ Two-factor authentication is <strong>required</strong> for your account. Set it up below to continue using the app.
+    </div>
+
     <!-- Two-factor authentication -->
     <section class="panel">
       <h2>Two-factor authentication</h2>
@@ -62,11 +66,16 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { apiPost } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
+
+// If MFA is mandatory and not yet set up, jump straight into enrollment.
+onMounted(() => {
+  if (auth.mustEnrollMfa) startSetup()
+})
 const busy = ref(false)
 const error = ref('')
 
@@ -127,6 +136,15 @@ async function changePassword() {
 .account-view { max-width: 640px; margin: 0 auto; padding: 1.5rem; }
 h1 { margin-bottom: 0.25rem; }
 .subtitle { color: var(--text-muted); margin-top: 0; }
+.enforce-banner {
+  background: rgba(251,191,36,0.12);
+  border: 1px solid rgba(251,191,36,0.4);
+  color: #fbbf24;
+  padding: 0.8rem 1rem;
+  border-radius: 0.7rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+}
 .panel {
   background: var(--bg-light);
   border: 1px solid var(--glass-border);

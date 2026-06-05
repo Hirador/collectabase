@@ -249,6 +249,9 @@ class User(Base):
     # TOTP multi-factor. Secret is base32; only "enabled" once the user has proven
     # they can generate a valid code (confirmed setup).
     mfa_enabled = Column(Boolean, server_default="0", nullable=False)
+    # Admin-enforced TOTP. Super admins are always required (in code) regardless;
+    # this flag forces enrollment for selected regular users.
+    mfa_required = Column(Boolean, server_default="0", nullable=False)
     mfa_secret = Column(String)
     mfa_recovery_codes = Column(Text)  # JSON list of bcrypt-hashed one-time codes
     # Bumped on password change / forced logout to invalidate outstanding tokens.
