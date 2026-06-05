@@ -1,26 +1,34 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ...database import dict_from_row, get_db
+from ...auth.deps import ActiveCollection, active_collection
 
 router = APIRouter()
 
 
 @router.get("/api/stats")
-async def get_stats():
+async def get_stats(ac: ActiveCollection = Depends(active_collection)):
+    cid = ac.id
     with get_db() as db:
-        total_games = db.execute("SELECT COUNT(*) FROM games WHERE is_wishlist = 0").fetchone()[0]
+        total_games = db.execute(
+            "SELECT COUNT(*) FROM games WHERE is_wishlist = 0 AND collection_id = ?", (cid,)
+        ).fetchone()[0]
         # Value = sum of all copy current_values (only copies with a value set count)
         total_value = db.execute(
             """SELECT COALESCE(SUM(gc.current_value), 0)
                FROM game_copies gc JOIN games g ON gc.game_id = g.id
-               WHERE g.is_wishlist = 0 AND gc.current_value IS NOT NULL"""
+               WHERE g.is_wishlist = 0 AND g.collection_id = ? AND gc.current_value IS NOT NULL""",
+            (cid,),
         ).fetchone()[0]
         purchase_value = db.execute(
             """SELECT COALESCE(SUM(gc.purchase_price), 0)
                FROM game_copies gc JOIN games g ON gc.game_id = g.id
-               WHERE g.is_wishlist = 0 AND gc.purchase_price IS NOT NULL"""
+               WHERE g.is_wishlist = 0 AND g.collection_id = ? AND gc.purchase_price IS NOT NULL""",
+            (cid,),
         ).fetchone()[0]
-        wishlist_count = db.execute("SELECT COUNT(*) FROM games WHERE is_wishlist = 1").fetchone()[0]
+        wishlist_count = db.execute(
+            "SELECT COUNT(*) FROM games WHERE is_wishlist = 1 AND collection_id = ?", (cid,)
+        ).fetchone()[0]
 
         cursor = db.execute(
             """
@@ -31,11 +39,12 @@ async def get_stats():
             FROM games g
             LEFT JOIN platforms p ON g.platform_id = p.id
             LEFT JOIN game_copies gc ON gc.game_id = g.id
-            WHERE g.is_wishlist = 0
+            WHERE g.is_wishlist = 0 AND g.collection_id = ?
               AND COALESCE(g.item_type, 'game') IN ('game', 'console', 'controller', 'accessory')
             GROUP BY p.name
             ORDER BY count DESC
-            """
+            """,
+            (cid,),
         )
         by_platform = []
         for row in cursor.fetchall():
@@ -51,9 +60,10 @@ async def get_stats():
             """
             SELECT gc.condition, COUNT(gc.id) as count
             FROM game_copies gc JOIN games g ON gc.game_id = g.id
-            WHERE g.is_wishlist = 0 AND gc.condition IS NOT NULL
+            WHERE g.is_wishlist = 0 AND g.collection_id = ? AND gc.condition IS NOT NULL
             GROUP BY gc.condition
-            """
+            """,
+            (cid,),
         )
         by_condition = [dict_from_row(row) for row in cursor.fetchall()]
 
@@ -64,10 +74,11 @@ async def get_stats():
                    COALESCE(SUM(gc.purchase_price), 0) as invested
             FROM games g
             LEFT JOIN game_copies gc ON gc.game_id = g.id
-            WHERE g.is_wishlist = 0
+            WHERE g.is_wishlist = 0 AND g.collection_id = ?
             GROUP BY g.item_type
             ORDER BY count DESC
-            """
+            """,
+            (cid,),
         )
         by_type = []
         for row in cursor.fetchall():
@@ -84,12 +95,13 @@ async def get_stats():
                    COALESCE(SUM(gc.current_value), 0) - COALESCE(SUM(gc.purchase_price), 0) as profit_loss
             FROM games g
             LEFT JOIN game_copies gc ON gc.game_id = g.id
-            WHERE g.is_wishlist = 0
+            WHERE g.is_wishlist = 0 AND g.collection_id = ?
             GROUP BY g.id, g.title, g.cover_url
             HAVING COALESCE(SUM(gc.current_value), 0) > 0
             ORDER BY COALESCE(SUM(gc.current_value), 0) DESC
             LIMIT 15
-            """
+            """,
+            (cid,),
         )
         top_valuable = [dict_from_row(row) for row in cursor.fetchall()]
 
@@ -104,12 +116,13 @@ async def get_stats():
                         ELSE 0 END as percent_gain
             FROM games g
             LEFT JOIN game_copies gc ON gc.game_id = g.id
-            WHERE g.is_wishlist = 0
+            WHERE g.is_wishlist = 0 AND g.collection_id = ?
             GROUP BY g.id, g.title, g.cover_url
             HAVING COALESCE(SUM(gc.purchase_price), 0) > 0
             ORDER BY percent_gain DESC
             LIMIT 15
-            """
+            """,
+            (cid,),
         )
         top_gainers = [dict_from_row(row) for row in cursor.fetchall()]
 
@@ -154,9 +167,11 @@ async def get_stats():
                 FROM lots l
                 LEFT JOIN lot_items li ON li.lot_id = l.id
                 LEFT JOIN lot_sales ls ON ls.lot_item_id = li.id
+                WHERE l.collection_id = ?
                 GROUP BY l.id, l.name, l.purchase_date, l.purchase_price_gross, l.shipping_in, l.fees_in, l.other_costs
                 ORDER BY realized_profit DESC, net_sales DESC, l.updated_at DESC
-                """
+                """,
+                (cid,),
             )
             for row in cursor.fetchall():
                 item = dict_from_row(row)
@@ -219,16 +234,17 @@ async def get_stats():
 
 
 @router.get("/api/stats/history")
-async def get_stats_history(days: int = 30):
+async def get_stats_history(days: int = 30, ac: ActiveCollection = Depends(active_collection)):
     with get_db() as db:
         cursor = db.execute(
             """
             SELECT recorded_at, total_value, game_value, hardware_value
             FROM value_history
+            WHERE collection_id = ?
             ORDER BY recorded_at DESC
             LIMIT ?
             """,
-            (days,)
+            (ac.id, days),
         )
         rows = cursor.fetchall()
 
