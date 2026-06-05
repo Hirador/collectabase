@@ -398,8 +398,8 @@ async function logout() {
 .user-caret { color: var(--text-muted); }
 .user-dropdown {
   position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
-  background: var(--bg-light); border: 1px solid var(--glass-border);
-  border-radius: 0.6rem; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.35); z-index: 200;
+  background: #18181b; border: 1px solid var(--glass-border);
+  border-radius: 0.6rem; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.55); z-index: 300;
 }
 .user-dropdown-item {
   display: block; width: 100%; text-align: left; background: transparent; border: none;
@@ -552,7 +552,7 @@ async function logout() {
 }
 .mobile-sheet {
   width: 100%;
-  background: var(--bg-light);
+  background: #18181b;
   border-top-left-radius: 1rem;
   border-top-right-radius: 1rem;
   border-top: 1px solid var(--glass-border);
