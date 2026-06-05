@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   collectabase:
     build: .
@@ -12,14 +10,23 @@ services:
       - ./data:/app/data
       # Map the local uploads directory for persistent cover images
       - ./uploads:/app/uploads
+      # TLS certificate + key (self-signed for local; real/Tailscale for remote)
+      - ./certs:/app/certs:ro
     environment:
       - DATABASE_URL=sqlite:////app/data/games.db
       - UPLOADS_DIR=/app/uploads
       - TZ=Europe/Berlin
+      # --- Multi-user auth / HTTPS ---
+      # Send session cookies only over HTTPS. Keep at 1 whenever TLS is enabled.
+      - COOKIE_SECURE=1
+      # Uvicorn terminates TLS when both files exist (no reverse proxy needed).
+      - SSL_CERTFILE=/app/certs/cert.pem
+      - SSL_KEYFILE=/app/certs/key.pem
+      # Optional: pin a JWT signing secret (else auto-generated + persisted in DB).
+      # - JWT_SECRET=change-me
       # Optional: Uncomment and populate these if you want to set them system-wide instead of via the UI
       # - IGDB_CLIENT_ID=
       # - IGDB_CLIENT_SECRET=
       # - EBAY_CLIENT_ID=
       # - EBAY_CLIENT_SECRET=
       # - RAWG_API_KEY=
-      # - ADMIN_API_KEY=
