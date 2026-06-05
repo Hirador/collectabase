@@ -61,9 +61,40 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
+def _backfill_personal_collections():
+    """Ensure every active user has at least one collection to work in.
+
+    Users created before the auto-personal-collection change (or any user who
+    somehow ends up with no membership) would otherwise have no scope to add
+    items and a hidden collection switcher. Idempotent: only touches users with
+    zero memberships. Build inserts from values read up-front (never SELECT
+    after commit — the legacy DB wrapper caches its connection)."""
+    from .database import get_db
+
+    with get_db() as db:
+        orphans = db.execute(
+            "SELECT u.id, u.email, u.display_name FROM users u "
+            "WHERE u.is_active = 1 "
+            "AND NOT EXISTS (SELECT 1 FROM collection_members m WHERE m.user_id = u.id)"
+        ).fetchall()
+        for u in orphans:
+            label = (u["display_name"] or "").strip() or u["email"].split("@")[0]
+            col = db.execute(
+                "INSERT INTO collections (name, owner_user_id, is_personal) VALUES (?, ?, 1)",
+                (f"{label}'s Collection", u["id"]),
+            )
+            db.execute(
+                "INSERT INTO collection_members (collection_id, user_id, role) VALUES (?, ?, 'owner')",
+                (col.lastrowid, u["id"]),
+            )
+        if orphans:
+            db.commit()
+
+
 @app.on_event("startup")
 async def startup_event():
     init_db()
+    _backfill_personal_collections()
     init_scheduler()
 
 @app.on_event("shutdown")

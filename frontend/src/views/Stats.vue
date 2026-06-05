@@ -407,8 +407,21 @@ const typeChartData = computed(() => {
 
 const donutOptions = {
   responsive: true,
+  maintainAspectRatio: false,
   plugins: {
     legend: { position: 'right', labels: { color: '#e2e8f0', boxWidth: 12 } }
+  }
+}
+
+const barOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { labels: { color: '#e2e8f0', boxWidth: 12 } }
+  },
+  scales: {
+    x: { ticks: { color: '#94a3b8' }, grid: { color: '#2d2d4e' } },
+    y: { ticks: { color: '#94a3b8' }, grid: { color: '#2d2d4e' } }
   }
 }
 
@@ -593,9 +606,7 @@ onMounted(() => {
 .chart-container {
   position: relative;
   height: 280px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  width: 100%;
 }
 
 .top-widgets-row {

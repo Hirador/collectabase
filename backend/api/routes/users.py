@@ -77,8 +77,20 @@ async def create_user(payload: CreateUserRequest, _admin: CurrentUser = Depends(
              hash_password(payload.password), 1 if payload.is_super_admin else 0,
              1 if payload.mfa_required else 0),
         )
-        db.commit()
         new_id = cur.lastrowid
+        # Give every new user a personal collection they own, so they land with a
+        # usable workspace. Without it they have no scope to add items and the
+        # collection switcher / "Manage collections" link stays hidden in the UI.
+        label = (payload.display_name or "").strip() or email.split("@")[0]
+        col = db.execute(
+            "INSERT INTO collections (name, owner_user_id, is_personal) VALUES (?, ?, 1)",
+            (f"{label}'s Collection", new_id),
+        )
+        db.execute(
+            "INSERT INTO collection_members (collection_id, user_id, role) VALUES (?, ?, 'owner')",
+            (col.lastrowid, new_id),
+        )
+        db.commit()
     return {"ok": True, "id": new_id, "email": email}
 
 
